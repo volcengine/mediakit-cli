@@ -1,0 +1,33 @@
+{
+  "name": "@ai-mediakit/cli",
+  "version": "0.1.0",
+  "description": "MediaKit CLI with multi-platform binary distribution via npm",
+  "license": "Apache-2.0",
+  "bin": {
+    "mediakit-cli": "scripts/run.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "README.md",
+    "Open Source Notice.txt",
+    "scripts",
+    "bin",
+    "skills"
+  ],
+  "keywords": [
+    "mediakit",
+    "cli",
+    "video",
+    "audio"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/volcengine/mediakit-cli.git",
+    "directory": "mediakit-cli"
+  }
+}

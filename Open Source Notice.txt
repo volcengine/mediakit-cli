@@ -1,0 +1,31 @@
+NOTICES FOR THIRD PARTY SOFTWARE THAT MAY BE CONTAINED IN PORTIONS OF THIS PRODUCT.
+
+Product:
+MediaKit CLI (@ai-mediakit/cli)
+
+This product is distributed under the Apache License 2.0. Portions of this
+product may contain third-party open source software. The following notices are
+provided for attribution and license compliance.
+
+Component:
+github.com/spf13/cobra : Apache License 2.0
+github.com/spf13/pflag : BSD 3-Clause License
+github.com/inconshreveable/mousetrap : Apache License 2.0
+
+External Runtime Tools:
+ffmpeg : LGPL v2.1 or later
+ffprobe : LGPL v2.1 or later
+
+Notes:
+- ffmpeg and ffprobe are external runtime tools invoked through os/exec. They are
+  not linked into, embedded in, or redistributed as part of the MediaKit CLI Go
+  binary or npm package by default.
+- Optional FFmpeg capabilities such as openh264, demuxer, libmp3lame, libass,
+  libfreetype, libfontconfig, libfribidi, libharfbuzz, zlib, libpng, and
+  libjpeg-turbo are detected as local FFmpeg build features only. They are not
+  linked into or redistributed as part of the MediaKit CLI by default.
+- Node.js is required to run the npm wrapper scripts, but Node.js itself is not
+  distributed in the MediaKit CLI npm package.
+
+This notice is provided for informational purposes and does not modify the
+license terms of MediaKit CLI or any third-party component.

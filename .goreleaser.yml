@@ -1,0 +1,54 @@
+version: 2
+
+project_name: mediakit-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mediakit-cli
+    binary: mediakit-cli
+    main: ./cmd/mediakit
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X mediakit-cli/internal/build.Version={{ .Version }}
+        -X mediakit-cli/internal/build.Date={{ .Date }}
+
+archives:
+  - id: mediakit-cli
+    ids:
+      - mediakit-cli
+    files:
+      - LICENSE
+      - Open Source Notice.txt
+      - README.md
+      - skills/**/*
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
