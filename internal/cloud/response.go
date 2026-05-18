@@ -99,6 +99,38 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 	return output
 }
 
+// isBusinessFailure 检测业务级失败：HTTP 2xx 但响应体中 success=false。
+func isBusinessFailure(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	value, ok := payload["success"]
+	if !ok {
+		return false
+	}
+	if success, ok := value.(bool); ok {
+		return !success
+	}
+	return false
+}
+
+// businessFailureResponse 把业务级失败的响应体按统一 error 结构平铺输出。
+func businessFailureResponse(payload map[string]any) map[string]any {
+	output := map[string]any{
+		"error": extractErrorMessage(payload),
+	}
+	if output["error"] == "" {
+		output["error"] = "unknown error"
+	}
+	if taskID := extractTaskID(payload); taskID != "" {
+		output["task_id"] = taskID
+	}
+	if requestID := extractRequestID(payload); requestID != "" {
+		output["request_id"] = requestID
+	}
+	return output
+}
+
 func extractErrorMessage(payload map[string]any) string {
 	if len(payload) == 0 {
 		return ""

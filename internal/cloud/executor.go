@@ -163,6 +163,9 @@ func maybePollQueryTask(client *Client, requestParams map[string]any, response m
 }
 
 func formatCommandResponse(command string, response map[string]any) map[string]any {
+	if isBusinessFailure(response) {
+		return businessFailureResponse(response)
+	}
 	if command == queryTaskCommand {
 		return queryTaskResponse(response)
 	}
