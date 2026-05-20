@@ -30,11 +30,12 @@ type Registration struct {
 
 // ExecContext carries runtime state for local execution.
 type ExecContext struct {
-	Command   string
-	Params    map[string]any
-	WorkDir   string
-	TempDir   string
-	OutputDir string
+	Command    string
+	Params     map[string]any
+	WorkDir    string
+	TempDir    string
+	OutputDir  string
+	OutputFile string // 如果用户指定了完整输出文件路径（带扩展名），则此字段非空
 
 	CommandIO *cobra.Command
 	Writer    output.Writer

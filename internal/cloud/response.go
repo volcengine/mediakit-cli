@@ -68,13 +68,12 @@ func newAPIError(statusCode int, payloadBytes []byte) error {
 }
 
 func errorResponse(err error, taskID string, requestID string) map[string]any {
-	output := map[string]any{
-		"error": "",
-	}
+	output := map[string]any{}
 
 	if apiErr, ok := err.(*APIError); ok {
-		output["error"] = extractErrorMessage(apiErr.Payload)
-		if output["error"] == "" {
+		if apiErr.Payload != nil {
+			output["error"] = apiErr.Payload
+		} else {
 			output["error"] = strings.TrimSpace(apiErr.Body)
 		}
 		if requestID == "" {
@@ -87,7 +86,7 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 		output["error"] = err.Error()
 	}
 
-	if output["error"] == "" {
+	if output["error"] == nil || output["error"] == "" {
 		output["error"] = "unknown error"
 	}
 	if taskID != "" {
@@ -114,12 +113,12 @@ func isBusinessFailure(payload map[string]any) bool {
 	return false
 }
 
-// businessFailureResponse 把业务级失败的响应体按统一 error 结构平铺输出。
+// businessFailureResponse 把业务级失败的响应体直接透传输出。
 func businessFailureResponse(payload map[string]any) map[string]any {
-	output := map[string]any{
-		"error": extractErrorMessage(payload),
-	}
-	if output["error"] == "" {
+	output := map[string]any{}
+	if errField, ok := payload["error"]; ok && errField != nil {
+		output["error"] = errField
+	} else {
 		output["error"] = "unknown error"
 	}
 	if taskID := extractTaskID(payload); taskID != "" {

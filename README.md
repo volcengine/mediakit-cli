@@ -7,14 +7,14 @@
 ### npm
 
 ```bash
-npm install -g @ai-mediakit/cli
+npm install -g @volcengine/mediakit-cli
 mediakit-cli version
 ```
 
 ### npx
 
 ```bash
-npx @ai-mediakit/cli version
+npx @volcengine/mediakit-cli version
 ```
 
 ### curl

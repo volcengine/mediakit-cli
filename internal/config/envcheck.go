@@ -84,7 +84,17 @@ func probeAllowedFFmpegDependency(ffmpegAvailable bool, dep string) ToolStatus {
 	}
 	switch dep {
 	case "openh264":
-		return probeFFmpegOutput(dep, []string{"-hide_banner", "-encoders"}, "libopenh264")
+		openh264Status := probeFFmpegOutput(dep, []string{"-hide_banner", "-encoders"}, "libopenh264")
+		if openh264Status.Available {
+			return openh264Status
+		}
+		videotoolboxStatus := probeFFmpegOutput("h264_videotoolbox", []string{"-hide_banner", "-encoders"}, "h264_videotoolbox")
+		if videotoolboxStatus.Available {
+			return ToolStatus{Available: true, Version: "detected via h264_videotoolbox"}
+		}
+		return ToolStatus{Available: false, Reason: "neither libopenh264 nor h264_videotoolbox detected"}
+	case "h264_videotoolbox":
+		return probeFFmpegOutput(dep, []string{"-hide_banner", "-encoders"}, "h264_videotoolbox")
 	case "demuxer":
 		return probeFFmpegOutput(dep, []string{"-hide_banner", "-demuxers"}, " concat")
 	case "libmp3lame":

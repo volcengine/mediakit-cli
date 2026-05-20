@@ -133,32 +133,40 @@ func renderLocalInstallGuide(requiredMissing []string, optionalMissing []string)
 	switch runtime.GOOS {
 	case "darwin":
 		lines = append(lines,
-			"macOS: 请安装 FFmpeg/FFprobe >= 5.1，并确认 `ffmpeg` 与 `ffprobe` 已加入 PATH。",
-			"注意: `brew install openh264 libass` 只安装库；当前 PATH 中的 `ffmpeg` 仍必须在编译时启用对应能力。",
-			"验证: `ffmpeg -hide_banner -encoders | grep libopenh264` 与 `ffmpeg -hide_banner -filters | grep subtitles` 都应有输出。",
+			"macOS 全量安装（推荐，含 openh264 + 字幕渲染全链路）:",
+			"  brew install ffmpeg --with-openh264",
+			"",
+			"说明: --with-openh264 会触发源码编译（约 5-10 分钟），编译时自动启用 libass/freetype/fontconfig/harfbuzz/libmp3lame 等默认依赖。",
+			"如果不需要 openh264（x264 可替代大部分 H.264 编码场景）:",
+			"  brew install ffmpeg",
+			"",
+			"验证:",
+			"  ffmpeg -hide_banner -encoders | grep libopenh264",
+			"  ffmpeg -hide_banner -filters | grep subtitles",
 		)
-		if containsDependency(optionalMissing, "openh264") {
-			lines = append(lines,
-				"openh264: 请安装或切换到包含 `--enable-libopenh264` 且暴露 `libopenh264` 编码器的 FFmpeg 构建。",
-			)
-		}
-		if containsDependency(optionalMissing, "libass") {
-			lines = append(lines,
-				"libass: 字幕烧录需要 `subtitles`/`ass` 滤镜，请安装或切换到包含 `--enable-libass` 的 FFmpeg 构建。",
-			)
-		}
 	case "windows":
 		lines = append(lines,
-			"Windows: 请安装 FFmpeg 5.1 系列完整构建，并把 `bin` 目录加入 PATH。",
-			"示例: 安装后执行 `ffmpeg -version` 和 `ffprobe -version` 确认版本与 PATH 生效。",
+			"Windows 全量安装（推荐 Chocolatey）:",
+			"  choco install ffmpeg-full",
+			"",
+			"或使用 Scoop:",
+			"  scoop install ffmpeg",
+			"",
+			"安装后确认 ffmpeg 和 ffprobe 在 PATH 中: ffmpeg -version && ffprobe -version",
 		)
 	case "linux":
 		lines = append(lines,
-			"Linux: Ubuntu 22.04 / Debian 12 可使用系统包安装 FFmpeg 5.1 LTS。",
-			"示例: sudo apt update && sudo apt install -y ffmpeg",
+			"Linux (Ubuntu/Debian):",
+			"  sudo apt update && sudo apt install -y ffmpeg",
+			"",
+			"Linux (RHEL/Fedora，需启用 RPM Fusion):",
+			"  sudo dnf install -y https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm",
+			"  sudo dnf install -y ffmpeg",
+			"",
+			"验证: ffmpeg -version && ffprobe -version",
 		)
 	default:
-		lines = append(lines, "其他平台: 请自行安装 FFmpeg/FFprobe >= 5.1，并确认 `ffmpeg` 与 `ffprobe` 已加入 PATH。")
+		lines = append(lines, "其他平台: 请自行安装 FFmpeg/FFprobe >= 5.1，并确认已加入 PATH。")
 	}
 	if len(requiredMissing) == 0 && len(optionalMissing) > 0 {
 		lines = append(lines, "当前必需工具已满足；可选能力是否安装取决于你要运行的本地方法。")

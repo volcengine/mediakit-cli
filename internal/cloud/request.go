@@ -8,26 +8,28 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	cliconfig "mediakit-cli/internal/config"
 )
 
 const (
-	envSurface = "MEDIAKIT_SURFACE"
-	envRuntime = "MEDIAKIT_RUNTIME"
-
 	envIdentityName          = "IDENTITY_NAME"
 	envOpenClawServiceMarker = "OPENCLAW_SERVICE_MARKER"
 )
 
-func resolveHeaderValue(envName string, fallback string) string {
+func resolveHeaderValue(envName string, configValue string, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(configValue); value != "" {
 		return value
 	}
 	return fallback
 }
 
-func resolveSurface() string {
+func resolveSurface(configSurface string) string {
 	const productSurface = "cli"
-	value := strings.TrimSpace(os.Getenv(envSurface))
+	value := resolveHeaderValue(cliconfig.EnvSurface, configSurface, productSurface)
 	if value == "" || value == productSurface {
 		return productSurface
 	}
@@ -37,8 +39,11 @@ func resolveSurface() string {
 	return productSurface + "/" + value
 }
 
-func resolveRuntime() string {
-	if value := strings.TrimSpace(os.Getenv(envRuntime)); value != "" {
+func resolveRuntime(configRuntime string) string {
+	if value := strings.TrimSpace(os.Getenv(cliconfig.EnvRuntime)); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(configRuntime); value != "" {
 		return value
 	}
 
@@ -80,8 +85,8 @@ func (c *Client) newRequest(method string, path string, query map[string]any, bo
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-surface", resolveSurface())
-	req.Header.Set("x-runtime", resolveRuntime())
+	req.Header.Set("x-surface", resolveSurface(c.Surface))
+	req.Header.Set("x-runtime", resolveRuntime(c.Runtime))
 	if c.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}

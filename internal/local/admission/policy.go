@@ -74,6 +74,7 @@ func AllowedDependencyNames() []string {
 		"ffmpeg",
 		"ffprobe",
 		"openh264",
+		"h264_videotoolbox",
 		"demuxer",
 		"libmp3lame",
 		"libass",

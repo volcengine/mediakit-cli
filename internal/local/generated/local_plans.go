@@ -121,7 +121,7 @@ func buildConcatVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", fileList, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out}
+	args := []string{"-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", fileList, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", out}
 	return &FFmpegPlan{
 		Args: args,
 		Result: videoResponse("concat-video", out, inputs, warnings, map[string]any{
@@ -200,7 +200,7 @@ func buildTrimVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	if duration, ok := trimDuration(start, hasStart, end, hasEnd); ok {
 		args = append(args, "-t", formatFloat(duration))
 	}
-	args = append(args, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out)
+	args = append(args, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", out)
 	return &FFmpegPlan{Args: args, Result: videoResponse("trim-video", out, []LocalInputRef{input}, warnings, map[string]any{"start_time": start, "end_time": end})}, nil
 }
 
@@ -334,7 +334,10 @@ func buildFlipVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + strings.Join(filters, ",") + "[outv]", "-map", "[outv]", "-map", "0:a:0", "-c:v", "libopenh264", "-b:v", "1200k", "-c:a", "aac", "-b:a", "128k", out}
+	args := append(
+		[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + strings.Join(filters, ",") + "[outv]", "-map", "[outv]", "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k"},
+		append(h264OutputArgs("1200k"), out)...,
+	)
 	return &FFmpegPlan{Args: args, Result: videoResponse("flip-video", out, []LocalInputRef{input}, warnings, map[string]any{"is_flip_vertical": vertical, "is_flip_horizontal": horizontal})}, nil
 }
 
@@ -366,9 +369,34 @@ func buildAdjustVideoSpeedPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		return nil, err
 	}
 	videoExpr := "setpts=" + formatFloat(1/speed) + "*PTS"
-	audioExpr := atempoChain(speed)
-	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + videoExpr + "[outv];[0:a]" + audioExpr + "[outa]", "-map", "[outv]", "-map", "[outa]", "-c:v", "libopenh264", "-b:v", "1200k", "-c:a", "aac", "-b:a", "128k", out}
+	hasAudio := hasAudioStream(input.LocalPath)
+	if hasAudio {
+		audioExpr := atempoChain(speed)
+		args := append(
+			[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + videoExpr + "[outv];[0:a]" + audioExpr + "[outa]", "-map", "[outv]", "-map", "[outa]", "-c:a", "aac", "-b:a", "128k"},
+			append(h264OutputArgs("1200k"), out)...,
+		)
+		return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+	}
+	args := append(
+		[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + videoExpr + "[outv]", "-map", "[outv]"},
+		append(h264OutputArgs("1200k"), "-an", out)...,
+	)
 	return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+}
+
+func hasAudioStream(filePath string) bool {
+	raw, err := core.RunFFprobe(
+		"-v", "error",
+		"-select_streams", "a",
+		"-show_entries", "stream=codec_type",
+		"-of", "csv=p=0",
+		filePath,
+	)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(raw)) == "audio"
 }
 
 func atempoChain(speed float64) string {
@@ -421,7 +449,10 @@ func buildAddSubtitleToVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-vf", "subtitles=" + escapeFilterPath(subtitleInput.LocalPath) + ":force_style='" + style + "'", "-map", "0:v:0", "-map", "0:a:0", "-c:v", "libopenh264", "-b:v", "1300k", "-c:a", "aac", "-b:a", "128k", out}
+	args := append(
+		[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-vf", "subtitles=" + escapeFilterPath(subtitleInput.LocalPath) + ":force_style='" + style + "'", "-map", "0:v:0", "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k"},
+		append(h264OutputArgs("1300k"), out)...,
+	)
 	return &FFmpegPlan{Args: args, Result: videoResponse("add-subtitle-to-video", out, []LocalInputRef{input, subtitleInput}, warnings, map[string]any{"subtitle_source": subtitleSource, "subtitle_pos_preset": valueOrDefault(ctx.Params, "subtitle_pos_preset", "bottom_center")})}, nil
 }
 
@@ -480,10 +511,21 @@ func buildAddImageToVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	scaleExpr := overlayScale2Ref(ctx.Params)
 	overlayExpr := overlayPosition(ctx.Params)
 	enableExpr := overlayEnable(ctx.Params)
-	args := []string{"-y", "-hide_banner", "-i", video.LocalPath, "-i", image.LocalPath, "-filter_complex", "[1:v][0:v]scale2ref=" + scaleExpr + "[wm][base];[base][wm]overlay=" + overlayExpr + enableExpr + "[outv]", "-map", "[outv]", "-map", "0:a:0", "-c:v", "libopenh264", "-b:v", "1300k", "-c:a", "aac", "-b:a", "128k", out}
+
+	// 只有用户明确指定了 width/height 时才缩放图片，否则保持原始尺寸（与云端行为一致）
+	var filterComplex string
+	if hasOverlayScale(ctx.Params) {
+		scaleExpr := overlayScale2Ref(ctx.Params)
+		filterComplex = "[1:v][0:v]scale2ref=" + scaleExpr + "[wm][base];[base][wm]overlay=" + overlayExpr + enableExpr + "[outv]"
+	} else {
+		filterComplex = "[0:v][1:v]overlay=" + overlayExpr + enableExpr + "[outv]"
+	}
+	args := append(
+		[]string{"-y", "-hide_banner", "-i", video.LocalPath, "-i", image.LocalPath, "-filter_complex", filterComplex, "-map", "[outv]", "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k"},
+		append(h264OutputArgs("1300k"), out)...,
+	)
 	return &FFmpegPlan{Args: args, Result: videoResponse("add-image-to-video", out, []LocalInputRef{video, image}, warnings, map[string]any{"overlay_start_time": ctx.Params["start_time"], "overlay_end_time": ctx.Params["end_time"]})}, nil
 }
 
@@ -575,6 +617,13 @@ func escapeFilterPath(path string) string {
 	return path
 }
 
+// hasOverlayScale 判断用户是否明确指定了图片缩放尺寸
+func hasOverlayScale(params map[string]any) bool {
+	w, wOk := params["sub_image_width"].(string)
+	h, hOk := params["sub_image_height"].(string)
+	return (wOk && strings.TrimSpace(w) != "") || (hOk && strings.TrimSpace(h) != "")
+}
+
 func overlayScale2Ref(params map[string]any) string {
 	width := valueOrDefault(params, "sub_image_width", "10%")
 	height := valueOrDefault(params, "sub_image_height", "5%")
@@ -606,7 +655,8 @@ func overlayCoordinate(value string, base string, overlay string) string {
 	if strings.HasSuffix(value, "%") {
 		ratio, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64)
 		if err == nil {
-			return "(" + base + "-" + overlay + ")*" + formatFloat(ratio/100)
+			// 与云端一致：百分比表示图片左上角在视频宽/高的绝对位置，超出部分自然截断
+			return base + "*" + formatFloat(ratio/100)
 		}
 	}
 	if value == "" {

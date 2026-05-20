@@ -1,7 +1,7 @@
 NOTICES FOR THIRD PARTY SOFTWARE THAT MAY BE CONTAINED IN PORTIONS OF THIS PRODUCT.
 
 Product:
-MediaKit CLI (@ai-mediakit/cli)
+MediaKit CLI (@volcengine/mediakit-cli)
 
 This product is distributed under the Apache License 2.0. Portions of this
 product may contain third-party open source software. The following notices are

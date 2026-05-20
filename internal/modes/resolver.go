@@ -83,7 +83,7 @@ func Dispatch(cmd *cobra.Command, meta CapabilityRuntimeMeta, params map[string]
 	case "local":
 		return local.Execute(cmd, meta.Name, params)
 	case "cloud":
-		return cloud.Execute(cmd, meta.Name, params, resolved.APIKey, resolved.Endpoint)
+		return cloud.Execute(cmd, meta.Name, params, resolved.APIKey, resolved.Endpoint, resolved.Surface, resolved.Runtime)
 	default:
 		return fmt.Errorf("unsupported execution mode: %s", decision.Mode)
 	}
@@ -207,7 +207,9 @@ func localDependencyInstallHint(dep string) string {
 	case "ffprobe":
 		return "请安装 ffprobe >= 5.1"
 	case "openh264":
-		return "请安装或切换到包含 libopenh264 编码器的 FFmpeg"
+		return "请安装或切换到包含 libopenh264 或 h264_videotoolbox 编码器的 FFmpeg"
+	case "h264_videotoolbox":
+		return "请安装或切换到包含 h264_videotoolbox 编码器的 FFmpeg（macOS 可用）"
 	case "demuxer":
 		return "请安装或切换到包含 concat demuxer 的 FFmpeg"
 	case "libmp3lame":
