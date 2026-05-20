@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -26,6 +27,14 @@ func Execute(cmd *cobra.Command, command string, params map[string]any) error {
 		return fmt.Errorf("%s 的本地处理器未实现", command)
 	}
 
+	// 执行前检查该命令所需的依赖是否可用
+	if missing := checkCommandDependencies(registration); len(missing) > 0 {
+		return &DependencyError{
+			Command: command,
+			Missing: missing,
+		}
+	}
+
 	workDir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -34,9 +43,24 @@ func Execute(cmd *cobra.Command, command string, params map[string]any) error {
 	if err != nil {
 		return err
 	}
-	outputDir, _, err := cliconfig.ResolveOutputPath(home)
-	if err != nil {
-		return err
+
+	// Output path: --output-path flag > env > config > default
+	// 如果 flag 值带文件扩展名，视为完整文件路径；否则视为目录
+	var outputDir string
+	var outputFile string
+	if flagOutputPath, flagErr := cmd.Flags().GetString("output-path"); flagErr == nil && flagOutputPath != "" {
+		if looksLikeFilePath(flagOutputPath) {
+			outputFile = flagOutputPath
+			outputDir = filepath.Dir(flagOutputPath)
+		} else {
+			outputDir = flagOutputPath
+		}
+	} else {
+		resolved, _, resolveErr := cliconfig.ResolveOutputPath(home)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		outputDir = resolved
 	}
 	if err := cliconfig.EnsureOutputDir(outputDir); err != nil {
 		return err
@@ -62,14 +86,15 @@ func Execute(cmd *cobra.Command, command string, params map[string]any) error {
 	}
 
 	ctx := &core.ExecContext{
-		Command:   command,
-		Params:    cloneParams(normalizedParams),
-		WorkDir:   workDir,
-		TempDir:   tempDir,
-		OutputDir: outputDir,
-		CommandIO: cmd,
-		Writer:    writer,
-		Limits:    core.DefaultResourceLimits(),
+		Command:    command,
+		Params:     cloneParams(normalizedParams),
+		WorkDir:    workDir,
+		TempDir:    tempDir,
+		OutputDir:  outputDir,
+		OutputFile: outputFile,
+		CommandIO:  cmd,
+		Writer:     writer,
+		Limits:     core.DefaultResourceLimits(),
 	}
 
 	result, err := registration.Handler.Execute(ctx)
@@ -146,4 +171,62 @@ func watchCleanupSignals(tempDir string) func() {
 		signal.Stop(signals)
 		close(signals)
 	}
+}
+
+// looksLikeFilePath 判断路径是否像一个文件路径（带媒体扩展名）
+func looksLikeFilePath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".mp4", ".mov", ".avi", ".mkv", ".flv", ".ts", ".wmv",
+		".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac",
+		".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg":
+		return true
+	default:
+		return false
+	}
+}
+
+// DependencyError 表示本地依赖缺失错误，携带安装指引
+type DependencyError struct {
+	Command string
+	Missing []string
+}
+
+func (e *DependencyError) Error() string {
+	return fmt.Sprintf("本地依赖缺失: %s", strings.Join(e.Missing, ", "))
+}
+
+// StructuredError 返回结构化错误（含 install_guide），供 JSON 输出使用
+func (e *DependencyError) StructuredError() map[string]any {
+	return map[string]any{
+		"error": map[string]any{
+			"type":          "environment_error",
+			"code":          "dependency_missing",
+			"message":       fmt.Sprintf("命令 %s 所需本地依赖缺失: %s", e.Command, strings.Join(e.Missing, ", ")),
+			"install_guide": cliconfig.InstallGuide(e.Missing),
+		},
+	}
+}
+
+// checkCommandDependencies 检查命令所需依赖是否可用
+func checkCommandDependencies(reg core.Registration) []string {
+	if len(reg.Dependencies) == 0 {
+		return nil
+	}
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return nil
+	}
+	cache, err := cliconfig.RefreshEnvCache(home)
+	if err != nil {
+		return nil
+	}
+	var missing []string
+	for _, dep := range reg.Dependencies {
+		status, ok := cache.Tools[dep]
+		if !ok || !status.Available {
+			missing = append(missing, dep)
+		}
+	}
+	return missing
 }

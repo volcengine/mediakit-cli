@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cliconfig "mediakit-cli/internal/config"
+	"mediakit-cli/internal/local"
 	"mediakit-cli/internal/modes"
 )
 
@@ -44,6 +47,7 @@ type CapabilityMeta struct {
 	LocalLimitations  []string
 	Async             bool
 	AsyncQueryCommand string
+	OutputType        string // "video", "audio", "file", "" (cloud-only 无 local 输出)
 	Params            []ParamMeta
 }
 
@@ -62,6 +66,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalSupported:    false,
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -132,6 +137,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalSupported:    false,
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -220,6 +226,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalSupported:    false,
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "images",
@@ -273,6 +280,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 提取音频；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "audio",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -325,6 +333,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 叠加图片；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -433,6 +442,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 字幕烧录；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -535,6 +545,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 音视频合并；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -627,6 +638,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 无转场拼接；transitions 需使用 cloud 模式。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_urls",
@@ -680,6 +692,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 翻转；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -741,6 +754,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 裁剪；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -801,6 +815,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 变速；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "video",
 		Params: []ParamMeta{
 			{
 				Name:        "video_url",
@@ -852,6 +867,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 音频拼接；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "audio",
 		Params: []ParamMeta{
 			{
 				Name:        "audio_urls",
@@ -894,6 +910,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalLimitations:  []string{"支持本地 FFmpeg 音频裁剪；callback/client_token 本地忽略。"},
 		Async:             true,
 		AsyncQueryCommand: "query-task",
+		OutputType:        "audio",
 		Params: []ParamMeta{
 			{
 				Name:        "audio_url",
@@ -951,6 +968,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalSupported: true,
 		LocalSource:    "generated",
 		Async:          false,
+		OutputType:     "file",
 		Params: []ParamMeta{
 			{
 				Name:        "url",
@@ -971,6 +989,7 @@ var generatedCapabilities = []CapabilityMeta{
 		LocalSupported:    false,
 		Async:             false,
 		AsyncQueryCommand: "",
+		OutputType:        "query-task",
 		Params: []ParamMeta{
 			{
 				Name:        "task_id",
@@ -1098,6 +1117,11 @@ func newCapabilityCommand(meta CapabilityMeta) *cobra.Command {
 		Args:              cobra.NoArgs,
 		DisableAutoGenTag: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --schema: 输出工具 schema 后退出
+			if schemaFlag, _ := cmd.Flags().GetBool("schema"); schemaFlag {
+				resolvedMode := resolveSchemaMode(cmd)
+				return writeJSON(cmd.OutOrStdout(), buildCapabilitySchema(capabilityMeta, resolvedMode))
+			}
 			params, err := collectCapabilityParams(cmd, capabilityMeta)
 			if err != nil {
 				return err
@@ -1109,6 +1133,9 @@ func newCapabilityCommand(meta CapabilityMeta) *cobra.Command {
 		},
 	}
 	bindCapabilityFlags(cmd, capabilityMeta)
+	cmd.Flags().String("output-path", "", "本地文件输出目录（覆盖 config/env 设置）")
+	cmd.Flags().Bool("schema", false, "输出该工具的 JSON Schema 描述（供 Agent 使用）")
+
 	return cmd
 }
 
@@ -1272,12 +1299,23 @@ func bindCapabilityFlags(cmd *cobra.Command, meta CapabilityMeta) {
 			cmd.Flags().String(param.FlagName, defaultString(param), helpText)
 		}
 		if param.Required {
-			_ = cmd.MarkFlagRequired(param.FlagName)
+			// required 校验移至 collectCapabilityParams，使 --schema 可无参执行
 		}
 	}
 }
 
 func collectCapabilityParams(cmd *cobra.Command, meta CapabilityMeta) (map[string]any, error) {
+	// 手动校验必填参数
+	var missing []string
+	for _, param := range meta.Params {
+		if param.Required && !cmd.Flags().Changed(param.FlagName) {
+			missing = append(missing, "--"+param.FlagName)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("required flag(s) %s not set", strings.Join(missing, ", "))
+	}
+
 	params := map[string]any{}
 	for _, param := range meta.Params {
 		if !cmd.Flags().Changed(param.FlagName) {
@@ -1461,10 +1499,264 @@ func defaultStringSlice(param ParamMeta) []string {
 }
 
 func writeCapabilityError(writer io.Writer, err error) error {
+	// 如果是 DependencyError，使用其自带的结构化输出（含 install_guide）
+	var depErr *local.DependencyError
+	if errors.As(err, &depErr) {
+		encoder := json.NewEncoder(writer)
+		encoder.SetEscapeHTML(false)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(depErr.StructuredError())
+	}
+
 	encoder := json.NewEncoder(writer)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(map[string]any{
-		"error": err.Error(),
+		"error": map[string]any{
+			"type":    classifyErrorType(err),
+			"code":    classifyErrorCode(err),
+			"message": err.Error(),
+		},
 	})
+}
+
+func classifyErrorType(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "禁止") ||
+		strings.Contains(msg, "不在白名单") ||
+		strings.Contains(msg, "不安全字符"):
+		return "security_violation"
+	case strings.Contains(msg, "必填参数") ||
+		strings.Contains(msg, "必须是") ||
+		strings.Contains(msg, "取值范围") ||
+		strings.Contains(msg, "至少需要") ||
+		strings.Contains(msg, "仅支持") ||
+		strings.Contains(msg, "必须大于") ||
+		strings.Contains(msg, "必须大于等于"):
+		return "invalid_parameter"
+	case strings.Contains(msg, "本地处理器未实现") ||
+		strings.Contains(msg, "不支持本地执行") ||
+		strings.Contains(msg, "本地依赖"):
+		return "environment_error"
+	default:
+		return "execution_error"
+	}
+}
+
+func classifyErrorCode(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "禁止"):
+		return "forbidden_operation"
+	case strings.Contains(msg, "不在白名单"):
+		return "not_whitelisted"
+	case strings.Contains(msg, "不安全字符"):
+		return "unsafe_characters"
+	case strings.Contains(msg, "必填参数"):
+		return "missing_required_param"
+	case strings.Contains(msg, "必须大于等于"):
+		return "param_out_of_range"
+	case strings.Contains(msg, "必须大于"):
+		return "param_out_of_range"
+	case strings.Contains(msg, "取值范围"):
+		return "param_out_of_range"
+	case strings.Contains(msg, "必须是"):
+		return "invalid_param_type"
+	case strings.Contains(msg, "至少需要"):
+		return "param_insufficient"
+	case strings.Contains(msg, "仅支持"):
+		return "unsupported_value"
+	case strings.Contains(msg, "本地处理器未实现"):
+		return "handler_not_implemented"
+	case strings.Contains(msg, "不支持本地执行"):
+		return "local_unsupported"
+	case strings.Contains(msg, "本地依赖"):
+		return "dependency_missing"
+	case strings.Contains(msg, "download failed"):
+		return "download_failed"
+	case strings.Contains(msg, "执行失败"):
+		return "execution_failed"
+	default:
+		return "unknown"
+	}
+}
+
+func writeJSON(out io.Writer, value any) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+
+func buildCapabilitySchema(meta CapabilityMeta, resolvedMode string) map[string]any {
+	// 构建 input_schema properties
+	properties := map[string]any{}
+	required := []string{}
+
+	for _, param := range meta.Params {
+		prop := map[string]any{}
+
+		// 类型映射
+		switch param.Type {
+		case "number":
+			prop["type"] = "number"
+		case "integer":
+			prop["type"] = "integer"
+		case "boolean":
+			prop["type"] = "boolean"
+		case "array":
+			prop["type"] = "array"
+			if param.ItemType != "" {
+				prop["items"] = map[string]any{"type": param.ItemType}
+			}
+		default:
+			prop["type"] = "string"
+		}
+
+		if param.Description != "" {
+			prop["description"] = param.Description
+		}
+		if len(param.Enum) > 0 {
+			prop["enum"] = param.Enum
+		}
+		if param.HasDefault && param.DefaultValue != "" {
+			prop["default"] = param.DefaultValue
+		}
+		if param.Required {
+			required = append(required, param.Name)
+		}
+
+		properties[param.Name] = prop
+	}
+
+	inputSchema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		inputSchema["required"] = required
+	}
+
+	// 构建描述
+	description := meta.Description
+	if meta.Async {
+		description += "\n\n- Async: 是,用 mediakit_shared_query_task 查询结果"
+	}
+	modeLabel := modes.ModeLabel(meta.runtimeMeta())
+	description += "\n- Mode: " + modeLabel
+
+	// 构建工具名（domain_tool 格式）
+	toolName := strings.ReplaceAll(meta.Name, "-", "_")
+
+	schema := map[string]any{
+		"name":          toolName,
+		"description":   description,
+		"input_schema":  inputSchema,
+		"output_schema": buildOutputSchema(meta, resolvedMode),
+	}
+
+	return schema
+}
+
+// resolveSchemaMode 根据 --local/--cloud flag 和全局配置决定 schema 输出的模式
+func resolveSchemaMode(cmd *cobra.Command) string {
+	localFlag, _ := cmd.Flags().GetBool("local")
+	cloudFlag, _ := cmd.Flags().GetBool("cloud")
+	if localFlag {
+		return cliconfig.ModeLocalFirst
+	}
+	if cloudFlag {
+		return cliconfig.ModeCloudFirst
+	}
+	// 读取全局配置
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return cliconfig.ModeCloudFirst
+	}
+	resolved, err := cliconfig.ResolveConfig(home)
+	if err != nil {
+		return cliconfig.ModeCloudFirst
+	}
+	return resolved.Mode
+}
+
+// buildOutputSchema 根据当前 mode 输出对应的 output schema
+func buildOutputSchema(meta CapabilityMeta, resolvedMode string) map[string]any {
+	// query-task 特殊处理：始终返回 cloud schema
+	if meta.OutputType == "query-task" {
+		return buildFinalResultSchema("query-task", "查询异步任务状态与结果")
+	}
+
+	// 根据 mode 决定输出哪种 schema
+	switch resolvedMode {
+	case cliconfig.ModeLocalFirst:
+		if meta.LocalSupported {
+			return buildFinalResultSchema(meta.OutputType, "本地模式直接返回处理结果")
+		}
+		// local-first 但该命令不支持本地，降级展示 cloud
+		if meta.Async {
+			return buildAsyncCloudSchema(meta)
+		}
+		return buildFinalResultSchema(meta.OutputType, "云端同步返回结果")
+
+	default: // cloud-first
+		if meta.Async {
+			return buildAsyncCloudSchema(meta)
+		}
+		if meta.LocalSupported && !meta.CloudOnly {
+			// 同步且支持 local 的 fetch-file 等
+			return buildFinalResultSchema(meta.OutputType, "本地模式直接返回处理结果")
+		}
+		return buildFinalResultSchema(meta.OutputType, "云端同步返回结果")
+	}
+}
+
+func buildAsyncCloudSchema(meta CapabilityMeta) map[string]any {
+	return map[string]any{
+		"description": "云端异步模式返回 task_id，需通过 query-task 轮询获取最终结果",
+		"type":        "object",
+		"properties": map[string]any{
+			"task_id":    map[string]any{"type": "string", "description": "异步任务 ID，用于 query-task 查询"},
+			"request_id": map[string]any{"type": "string", "description": "请求 ID"},
+		},
+		"final_result": buildFinalResultSchema(meta.OutputType, "query-task 完成后的最终结果"),
+	}
+}
+
+func buildFinalResultSchema(outputType string, description string) map[string]any {
+	schema := map[string]any{
+		"description": description,
+		"type":        "object",
+	}
+
+	switch outputType {
+	case "video":
+		schema["properties"] = map[string]any{
+			"video_url":  map[string]any{"type": "string", "description": "输出视频文件路径或 URL"},
+			"duration":   map[string]any{"type": "number", "description": "视频时长，单位：秒"},
+			"resolution": map[string]any{"type": "string", "description": "视频分辨率档位（如 360p, 480p, 720p, 1080p, 2k, 4k）"},
+		}
+	case "audio":
+		schema["properties"] = map[string]any{
+			"audio_url": map[string]any{"type": "string", "description": "输出音频文件路径或 URL"},
+			"duration":  map[string]any{"type": "number", "description": "音频时长，单位：秒"},
+		}
+	case "file":
+		schema["properties"] = map[string]any{
+			"local_path": map[string]any{"type": "string", "description": "本地文件路径"},
+		}
+	case "query-task":
+		schema["properties"] = map[string]any{
+			"task_id":    map[string]any{"type": "string", "description": "任务 ID"},
+			"status":     map[string]any{"type": "string", "description": "任务状态（processing, success, failed）"},
+			"request_id": map[string]any{"type": "string", "description": "请求 ID"},
+			"video_url":  map[string]any{"type": "string", "description": "任务完成后的输出文件 URL（视频类任务）"},
+			"audio_url":  map[string]any{"type": "string", "description": "任务完成后的输出文件 URL（音频类任务）"},
+		}
+	default:
+		schema["properties"] = map[string]any{}
+	}
+
+	return schema
 }

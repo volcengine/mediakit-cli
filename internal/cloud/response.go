@@ -68,13 +68,12 @@ func newAPIError(statusCode int, payloadBytes []byte) error {
 }
 
 func errorResponse(err error, taskID string, requestID string) map[string]any {
-	output := map[string]any{
-		"error": "",
-	}
+	output := map[string]any{}
 
 	if apiErr, ok := err.(*APIError); ok {
-		output["error"] = extractErrorMessage(apiErr.Payload)
-		if output["error"] == "" {
+		if apiErr.Payload != nil {
+			output["error"] = apiErr.Payload
+		} else {
 			output["error"] = strings.TrimSpace(apiErr.Body)
 		}
 		if requestID == "" {
@@ -87,13 +86,45 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 		output["error"] = err.Error()
 	}
 
-	if output["error"] == "" {
+	if output["error"] == nil || output["error"] == "" {
 		output["error"] = "unknown error"
 	}
 	if taskID != "" {
 		output["task_id"] = taskID
 	}
 	if requestID != "" {
+		output["request_id"] = requestID
+	}
+	return output
+}
+
+// isBusinessFailure 检测业务级失败：HTTP 2xx 但响应体中 success=false。
+func isBusinessFailure(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	value, ok := payload["success"]
+	if !ok {
+		return false
+	}
+	if success, ok := value.(bool); ok {
+		return !success
+	}
+	return false
+}
+
+// businessFailureResponse 把业务级失败的响应体直接透传输出。
+func businessFailureResponse(payload map[string]any) map[string]any {
+	output := map[string]any{}
+	if errField, ok := payload["error"]; ok && errField != nil {
+		output["error"] = errField
+	} else {
+		output["error"] = "unknown error"
+	}
+	if taskID := extractTaskID(payload); taskID != "" {
+		output["task_id"] = taskID
+	}
+	if requestID := extractRequestID(payload); requestID != "" {
 		output["request_id"] = requestID
 	}
 	return output

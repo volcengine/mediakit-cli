@@ -12,10 +12,12 @@ const defaultEndpoint = "https://amk.cn-beijing.volces.com"
 type Client struct {
 	Endpoint   string
 	APIKey     string
+	Surface    string
+	Runtime    string
 	HTTPClient *http.Client
 }
 
-func NewClient(apiKey string, endpoint string) *Client {
+func NewClient(apiKey string, endpoint string, surface string, runtime string) *Client {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		endpoint = defaultEndpoint
@@ -23,6 +25,8 @@ func NewClient(apiKey string, endpoint string) *Client {
 	return &Client{
 		Endpoint: endpoint,
 		APIKey:   strings.TrimSpace(apiKey),
+		Surface:  strings.TrimSpace(surface),
+		Runtime:  strings.TrimSpace(runtime),
 		HTTPClient: &http.Client{
 			Timeout: 10 * time.Minute,
 		},

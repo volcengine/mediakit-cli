@@ -120,10 +120,16 @@ func promptCredentialStore(reader *bufio.Reader, out io.Writer) (string, error) 
 	}
 }
 
-func formatExportLines(apiKey, endpoint string) string {
+func formatExportLines(apiKey, endpoint, surface, runtime string) string {
 	lines := []string{fmt.Sprintf("export %s=%q", cliconfig.EnvAPIKey, apiKey)}
 	if endpoint != "" {
 		lines = append(lines, fmt.Sprintf("export %s=%q", cliconfig.EnvEndpoint, endpoint))
+	}
+	if surface != "" {
+		lines = append(lines, fmt.Sprintf("export %s=%q", cliconfig.EnvSurface, surface))
+	}
+	if runtime != "" {
+		lines = append(lines, fmt.Sprintf("export %s=%q", cliconfig.EnvRuntime, runtime))
 	}
 	return strings.Join(lines, "\n")
 }

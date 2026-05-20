@@ -28,7 +28,7 @@ type queryTaskPollOptions struct {
 	PollComplete bool
 }
 
-func Execute(cmd *cobra.Command, command string, params map[string]any, apiKey string, endpoint string) error {
+func Execute(cmd *cobra.Command, command string, params map[string]any, apiKey string, endpoint string, surface string, runtime string) error {
 	if strings.TrimSpace(apiKey) == "" {
 		return writeJSON(cmd.OutOrStdout(), errorResponse(fmt.Errorf("cloud 执行需要配置 MEDIAKIT_API_KEY"), "", ""))
 	}
@@ -40,7 +40,7 @@ func Execute(cmd *cobra.Command, command string, params map[string]any, apiKey s
 		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
 	}
 
-	client := NewClient(apiKey, endpoint)
+	client := NewClient(apiKey, endpoint, surface, runtime)
 	response, err := client.Call(normalizedCommand, requestParams)
 	if err != nil {
 		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
@@ -163,6 +163,9 @@ func maybePollQueryTask(client *Client, requestParams map[string]any, response m
 }
 
 func formatCommandResponse(command string, response map[string]any) map[string]any {
+	if isBusinessFailure(response) {
+		return businessFailureResponse(response)
+	}
 	if command == queryTaskCommand {
 		return queryTaskResponse(response)
 	}

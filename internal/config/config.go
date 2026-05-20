@@ -13,6 +13,7 @@ import (
 
 const (
 	DefaultMode          = "cloud-first"
+	DefaultSurface       = "cli"
 	ModeLocalFirst       = "local-first"
 	ModeCloudFirst       = "cloud-first"
 	ConfigDirName        = ".mediakit"
@@ -23,6 +24,8 @@ const (
 	EnvAPIKey            = "MEDIAKIT_API_KEY"
 	EnvEndpoint          = "MEDIAKIT_ENDPOINT"
 	EnvOutputPath        = "MEDIAKIT_OUTPUT_PATH"
+	EnvSurface           = "MEDIAKIT_SURFACE"
+	EnvRuntime           = "MEDIAKIT_RUNTIME"
 )
 
 type Config struct {
@@ -30,6 +33,9 @@ type Config struct {
 	APIKey          string `json:"api_key,omitempty"`
 	Endpoint        string `json:"endpoint,omitempty"`
 	CredentialStore string `json:"credential_store,omitempty"`
+	OutputPath      string `json:"output_path,omitempty"`
+	Surface         string `json:"surface,omitempty"`
+	Runtime         string `json:"runtime,omitempty"`
 }
 
 type ResolvedConfig struct {
@@ -43,6 +49,8 @@ type ResolvedConfig struct {
 	ConfigPath       string
 	EnvCachePath     string
 	CredentialStore  string
+	Surface          string
+	Runtime          string
 }
 
 type ToolStatus struct {
@@ -61,7 +69,10 @@ type EnvCache struct {
 }
 
 func DefaultConfig() Config {
-	return Config{Mode: DefaultMode}
+	return Config{
+		Mode:    DefaultMode,
+		Surface: DefaultSurface,
+	}
 }
 
 func ConfigDir(home string) string {
@@ -97,15 +108,23 @@ func EnsureOutputDir(path string) error {
 }
 
 func ResolveOutputPath(home string) (string, string, error) {
-	value := strings.TrimSpace(os.Getenv(EnvOutputPath))
-	if value == "" {
-		return DefaultOutputPath(home), "default", nil
+	// Priority: env > config > default
+	if value := strings.TrimSpace(os.Getenv(EnvOutputPath)); value != "" {
+		outputPath, err := expandUserPath(value, home)
+		if err != nil {
+			return "", "", err
+		}
+		return outputPath, "env", nil
 	}
-	outputPath, err := expandUserPath(value, home)
-	if err != nil {
-		return "", "", err
+	cfg, err := LoadConfig(home)
+	if err == nil && strings.TrimSpace(cfg.OutputPath) != "" {
+		outputPath, err := expandUserPath(cfg.OutputPath, home)
+		if err != nil {
+			return "", "", err
+		}
+		return outputPath, "config", nil
 	}
-	return outputPath, "env", nil
+	return DefaultOutputPath(home), "default", nil
 }
 
 func ValidateMode(mode string) error {
@@ -136,6 +155,9 @@ func LoadConfig(home string) (Config, error) {
 	if cfg.Mode == "" {
 		cfg.Mode = DefaultMode
 	}
+	if cfg.Surface == "" {
+		cfg.Surface = DefaultSurface
+	}
 	if err := ValidateMode(cfg.Mode); err != nil {
 		cfg.Mode = DefaultMode
 	}
@@ -145,6 +167,9 @@ func LoadConfig(home string) (Config, error) {
 func SaveConfig(home string, cfg Config) error {
 	if cfg.Mode == "" {
 		cfg.Mode = DefaultMode
+	}
+	if cfg.Surface == "" {
+		cfg.Surface = DefaultSurface
 	}
 	if err := ValidateMode(cfg.Mode); err != nil {
 		return err
@@ -172,6 +197,8 @@ func ResolveConfig(home string) (ResolvedConfig, error) {
 		ConfigPath:       ConfigFile(home),
 		EnvCachePath:     EnvCacheFile(home),
 		CredentialStore:  fileCfg.CredentialStore,
+		Surface:          fileCfg.Surface,
+		Runtime:          fileCfg.Runtime,
 	}
 	if resolved.Mode == "" {
 		resolved.Mode = DefaultMode
@@ -188,6 +215,12 @@ func ResolveConfig(home string) (ResolvedConfig, error) {
 	if value := strings.TrimSpace(os.Getenv(EnvEndpoint)); value != "" {
 		resolved.Endpoint = value
 		resolved.EndpointSource = "env"
+	}
+	if value := strings.TrimSpace(os.Getenv(EnvSurface)); value != "" {
+		resolved.Surface = value
+	}
+	if value := strings.TrimSpace(os.Getenv(EnvRuntime)); value != "" {
+		resolved.Runtime = value
 	}
 	outputPath, outputSource, err := ResolveOutputPath(home)
 	if err != nil {

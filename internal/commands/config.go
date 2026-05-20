@@ -25,6 +25,7 @@ func newConfigSetCmd() *cobra.Command {
 		Short: "Set configuration values",
 	}
 	cmd.AddCommand(newConfigSetModeCmd())
+	cmd.AddCommand(newConfigSetOutputPathCmd())
 	return cmd
 }
 
@@ -56,6 +57,32 @@ func newConfigSetModeCmd() *cobra.Command {
 	}
 }
 
+func newConfigSetOutputPathCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "output-path [path]",
+		Short: "Set the local file output directory",
+		Long:  "Set the local file output directory. Priority: --output-path flag > MEDIAKIT_OUTPUT_PATH env > config > ~/.mediakit/temp",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			outputPath := args[0]
+			home, homeErr := cliconfig.ResolveHomeDir()
+			if homeErr != nil {
+				return homeErr
+			}
+			cfg, loadErr := cliconfig.LoadConfig(home)
+			if loadErr != nil {
+				return loadErr
+			}
+			cfg.OutputPath = outputPath
+			if err := cliconfig.SaveConfig(home, cfg); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "本地文件输出目录已更新为 %s\n配置文件：%s\n", outputPath, cliconfig.ConfigFile(home))
+			return err
+		},
+	}
+}
+
 func newConfigShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
@@ -75,12 +102,14 @@ func newConfigShowCmd() *cobra.Command {
 			}
 			_, err := fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"当前配置\n- mode: %s\n- api_key: %s (%s)\n- endpoint: %s (%s)\n- credential_store: %s\n- config_file: %s\n- env_cache: %s\n- last_env_check: %s\n",
+				"当前配置\n- mode: %s\n- api_key: %s (%s)\n- endpoint: %s (%s)\n- output_path: %s (%s)\n- credential_store: %s\n- config_file: %s\n- env_cache: %s\n- last_env_check: %s\n",
 				resolved.Mode,
 				displaySecret(resolved.APIKey),
 				resolved.APIKeySource,
 				resolved.Endpoint,
 				resolved.EndpointSource,
+				resolved.OutputPath,
+				resolved.OutputPathSource,
 				resolved.CredentialStore,
 				resolved.ConfigPath,
 				resolved.EnvCachePath,

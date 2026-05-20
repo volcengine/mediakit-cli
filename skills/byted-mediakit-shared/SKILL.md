@@ -1,17 +1,18 @@
 ---
 name: byted-mediakit-shared
-version: "1.0.0"
-description: "mediakit-cli 共享：环境检查、初始化配置、命令结构、认证配置、异步任务响应与错误处理。"
+version: '1.0.0'
+description: 'mediakit-cli 共享：环境检查、初始化配置、命令结构、认证配置、异步任务响应与错误处理。'
 permissions:
   - shell
 metadata:
   requires:
-    bins: ["mediakit-cli"]
-  cliHelp: "mediakit-cli --help"
+    bins: ['mediakit-cli']
+  cliHelp: 'mediakit-cli --help'
   product: mediakit-cli/skills
   domain: shared
   capability_count: 14
 ---
+
 # MediaKit 共享规则
 
 本技能指导你如何通过 mediakit-cli 操作媒体资源，以及调用过程中的通用规则和注意事项。
@@ -24,7 +25,7 @@ metadata:
 
 ```bash
 # 安装
-npm install -g @ai-mediakit/cli
+npm install -g @volcengine/mediakit-cli
 
 # 验证
 mediakit-cli --version
@@ -36,18 +37,18 @@ mediakit-cli --version
 
 #### 字段说明
 
-- 环境变量/配置文件：`MEDIAKIT_API_KEY`、`MEDIAKIT_ENDPOINT`
+- 环境变量/配置文件：`MEDIAKIT_API_KEY`、`MEDIAKIT_ENDPOINT`、`MEDIAKIT_SURFACE`、`MEDIAKIT_RUNTIME`
 
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `MEDIAKIT_API_KEY` | 云端模式必填 | API 认证 Token |
-| `MEDIAKIT_ENDPOINT` | 否 | API 访问点 |
-| `MEDIAKIT_SURFACE` | 否 | 仅 CLI 云端调用支持；Skill 建议 `skill`，Plugin 建议 `plugin`，最终上报 `cli/skill` 或 `cli/plugin` |
-| `MEDIAKIT_RUNTIME` | 否 | 请求来源 Header `x-runtime`；按宿主设置为 `claude`、`arkclaw` 等 |
+| 变量                | 必填         | 说明                                                                                                                    |
+| ------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `MEDIAKIT_API_KEY`  | 云端模式必填 | API 认证 Token                                                                                                          |
+| `MEDIAKIT_ENDPOINT` | 否           | API 访问点                                                                                                              |
+| `MEDIAKIT_SURFACE`  | 否           | 请求来源 Header `x-surface`；默认 `cli`，Skill 建议 `skill`，Plugin 建议 `plugin`，最终上报 `cli/skill` 或 `cli/plugin` |
+| `MEDIAKIT_RUNTIME`  | 否           | 请求来源 Header `x-runtime`；按宿主设置为 `claude`、`arkclaw` 等，未配置时回退环境探测或 `unknown`                      |
 
 任一必填项缺失时，终止执行并输出所有缺失项的列表及修复建议。
 
-云端调用会自动携带 `x-surface` / `x-runtime`。当本 Skill/Plugin 通过 `mediakit-cli` 调用云端能力时，运行环境应注入 `MEDIAKIT_SURFACE=skill|plugin` 与 `MEDIAKIT_RUNTIME=<宿主>`；CLI 会保留原始产物前缀并上报 `x-surface=cli/skill|cli/plugin`。否则 CLI 默认按 `x-surface=cli`、`x-runtime=unknown` 上报。
+云端调用会自动携带 `x-surface` / `x-runtime`。Header 优先级为：环境变量 > `~/.mediakit/config.json` > 默认值/环境探测。当本 Skill/Plugin 通过 `mediakit-cli` 调用云端能力时，运行环境应注入 `MEDIAKIT_SURFACE=skill|plugin` 与 `MEDIAKIT_RUNTIME=<宿主>`；CLI 会保留原始产物前缀并上报 `x-surface=cli/skill|cli/plugin`。若未显式配置，CLI 默认按 `x-surface=cli`，`x-runtime` 依次回退 `IDENTITY_NAME` / `OPENCLAW_SERVICE_MARKER` 环境探测，最后为 `unknown`。
 
 ### 来源上报约束
 
@@ -69,6 +70,13 @@ MEDIAKIT_SURFACE=plugin MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-imag
 
 ```bash
 mediakit-cli init
+```
+
+Agent 非交互初始化可显式写入请求来源与运行时配置：
+
+```bash
+mediakit-cli init --mode cloud-first --api-key <key> --runtime <runtime> --surface cli --yes
+mediakit-cli init --mode local-first --api-key <key> --endpoint <url> --output-path ~/mediakit-output --runtime <runtime> --surface cli --credential-store config --yes
 ```
 
 初始化后常用命令如下：
@@ -106,9 +114,38 @@ mediakit-cli {domain} --help
 
 # 查看具体工具的参数
 mediakit-cli {domain} {tool} --help
+
+# 动态发现工具能力与返回结构
+mediakit-cli {domain} {tool} --schema
+mediakit-cli --local {domain} {tool} --schema
 ```
 
 当前产物覆盖的 domain 包括：`editing`, `video`。
+
+### Schema 发现
+
+每个 capability 命令都支持 `--schema`，用于 Agent 动态读取工具能力，不要求传必填业务参数。
+
+返回结构包含：
+
+- `name`：工具名，使用 snake_case，如 `add_image_to_video`
+- `description`：工具描述，自动包含 `Mode` 与 `Async` 信息
+- `input_schema`：输入参数 JSON Schema
+- `output_schema`：当前执行模式下的返回结构
+
+输出区分规则：
+
+- 默认按全局 `mode` 配置解析返回面
+- `--local ... --schema` 输出本地模式返回面，本地模式直接返回最终结果字段
+- 云端异步工具输出 `task_id` / `request_id`，并在 `final_result` 中描述 `query-task` 完成态结果
+- `query-task` 是 cloud only，schema 描述任务状态与完成态结果
+
+示例：
+
+```bash
+mediakit-cli editing trim-video --schema
+mediakit-cli --local editing trim-video --schema
+```
 
 ### 单次调用模式覆盖
 
@@ -139,11 +176,25 @@ mediakit-cli shared query-task --task-id <task_id>
 - local 模式下不支持 query-task
 - 当前本轮能力以云端执行为主；如需显式声明，请优先使用 `--cloud`
 
+### Local 模式补充
+
+- 本地输出目录优先级：`--output-path` > `MEDIAKIT_OUTPUT_PATH` > config `output_path` > `~/.mediakit/temp`
+- 当 `--output-path` 指向具体媒体文件名时，直接作为最终输出文件；否则按输入文件名生成 `{原文件名}_{工具名}.{ext}`，重复时追加 6 位随机数
+- 无法从输入 URL 或路径提取文件名时，退回 `{工具名}-{UnixNano}.{ext}`
+- local 模式依赖 `ffmpeg` / `ffprobe`，缺失时错误中会给出 `install_guide`
+- local 模式媒体处理输出必须贴合接口 response schema，禁止输出内部执行元数据
+
+### 错误响应
+
+- CLI cloud 模式直接透传 API 返回的原始 error 对象，不提取 `message`
+- CLI local 模式返回结构化错误：`{"error":{"type":"...","code":"...","message":"..."}}`
+- MCP error_response 直接透传原始 error 内容，dict 原样作为 `error` 字段值
+
 ## 幂等参数维护
 
-| 参数 | 作用 | 维护建议 |
-|------|------|----------|
-| `client_token` | 主动控制幂等 | 请求重试时复用同一值；强制重新执行时传新的唯一值 |
+| 参数            | 作用         | 维护建议                                               |
+| --------------- | ------------ | ------------------------------------------------------ |
+| `client_token`  | 主动控制幂等 | 请求重试时复用同一值；强制重新执行时传新的唯一值       |
 | `callback_args` | 透传回调参数 | 建议与 `client_token` 一起维护，便于回调对账与重试追踪 |
 
 补充规则：
@@ -153,8 +204,8 @@ mediakit-cli shared query-task --task-id <task_id>
 
 ## 轮询策略
 
-| 参数 | 描述 | 默认值 |
-|------|------|--------|
-| `poll-interval-seconds` | 轮询间隔 | 10s |
-| `max-poll-attempts` | 轮询次数，0 代表不查询 | 0 |
-| `poll-complete` | 阻塞至终态 | - |
+| 参数                    | 描述                   | 默认值 |
+| ----------------------- | ---------------------- | ------ |
+| `poll-interval-seconds` | 轮询间隔               | 10s    |
+| `max-poll-attempts`     | 轮询次数，0 代表不查询 | 0      |
+| `poll-complete`         | 阻塞至终态             | -      |

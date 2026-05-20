@@ -3,7 +3,10 @@ package generated
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -82,9 +85,17 @@ func enrichMediaResult(result map[string]any) {
 	}
 	if isVideo {
 		for _, stream := range info.Streams {
-			if resolution := resolutionFromHeight(stream.Height); resolution != "" && stream.Width > 0 {
-				result["resolution"] = resolution
-				break
+			if stream.Width > 0 && stream.Height > 0 {
+				// Use the shorter side to determine resolution class,
+				// so portrait videos (e.g. 1080×1920) are not misclassified.
+				shortSide := stream.Height
+				if stream.Width < stream.Height {
+					shortSide = stream.Width
+				}
+				if resolution := resolutionFromHeight(shortSide); resolution != "" {
+					result["resolution"] = resolution
+					break
+				}
 			}
 		}
 	}
@@ -136,6 +147,33 @@ func resolutionFromHeight(height int) string {
 	default:
 		return "4k"
 	}
+}
+
+func preferredH264Encoder() string {
+	if supportsFFmpegEncoder("libopenh264") {
+		return "libopenh264"
+	}
+	if supportsFFmpegEncoder("h264_videotoolbox") {
+		return "h264_videotoolbox"
+	}
+	return "libopenh264"
+}
+
+func supportsFFmpegEncoder(encoder string) bool {
+	output, err := exec.Command("ffmpeg", "-hide_banner", "-encoders").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(output)), strings.ToLower(encoder))
+}
+
+func h264OutputArgs(videoBitrate string) []string {
+	encoder := preferredH264Encoder()
+	args := []string{"-c:v", encoder, "-b:v", videoBitrate}
+	if encoder == "h264_videotoolbox" {
+		args = append(args, "-pix_fmt", "yuv420p")
+	}
+	return args
 }
 
 func materializeRequiredInput(ctx *core.ExecContext, key string) (string, error) {
@@ -315,20 +353,90 @@ func preferredExtFromPath(source string, fallback string) string {
 }
 
 func outputPathFor(ctx *core.ExecContext, command string, ext string) (string, error) {
+	// 如果用户指定了完整输出文件路径，直接使用
+	if ctx.OutputFile != "" {
+		if err := os.MkdirAll(filepath.Dir(ctx.OutputFile), 0o755); err != nil {
+			return "", err
+		}
+		return ctx.OutputFile, nil
+	}
+
 	command = strings.TrimSpace(strings.ReplaceAll(command, "_", "-"))
 	if command == "" {
 		command = "output"
 	}
 	ext = preferredExtFromPath("", ext)
-	relative := filepath.Join(".mediakit", "local", fmt.Sprintf("%s-%d%s", command, time.Now().UnixNano(), ext))
-	outputPath, err := core.ResolveOutputPath(ctx, relative)
-	if err != nil {
-		return "", err
+
+	// 尝试从输入参数提取源文件名
+	inputName := extractInputBaseName(ctx.Params)
+	var filename string
+	if inputName != "" {
+		// 原文件名_工具名.ext
+		filename = fmt.Sprintf("%s_%s%s", inputName, command, ext)
+	} else {
+		// 无文件名时保持原逻辑
+		filename = fmt.Sprintf("%s-%d%s", command, time.Now().UnixNano(), ext)
 	}
+
+	outputPath := filepath.Join(ctx.OutputDir, filename)
+
+	// 文件已存在则加 6 位随机串
+	if _, err := os.Stat(outputPath); err == nil {
+		randSuffix := fmt.Sprintf("%06d", rand.Intn(1000000))
+		if inputName != "" {
+			filename = fmt.Sprintf("%s_%s_%s%s", inputName, command, randSuffix, ext)
+		} else {
+			filename = fmt.Sprintf("%s-%s%s", command, randSuffix, ext)
+		}
+		outputPath = filepath.Join(ctx.OutputDir, filename)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return "", err
 	}
 	return outputPath, nil
+}
+
+// extractInputBaseName 从参数中提取输入文件的基础名称（不含扩展名）
+func extractInputBaseName(params map[string]any) string {
+	// 优先取 video_url，其次 audio_url
+	for _, key := range []string{"video_url", "audio_url"} {
+		if val, ok := params[key]; ok {
+			if s, ok := val.(string); ok && s != "" {
+				return fileBaseName(s)
+			}
+		}
+	}
+	// concat 场景取第一个
+	for _, key := range []string{"video_urls", "audio_urls"} {
+		if val, ok := params[key]; ok {
+			if arr, ok := val.([]any); ok && len(arr) > 0 {
+				if s, ok := arr[0].(string); ok && s != "" {
+					return fileBaseName(s)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// fileBaseName 提取路径或 URL 的文件名（不含扩展名）
+func fileBaseName(path string) string {
+	// 尝试解析为 URL
+	if u, err := url.Parse(path); err == nil && u.Path != "" {
+		path = u.Path
+	}
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	// URL 解码（如 %E5%8F%A3%E6%92%AD -> 口播）
+	if decoded, err := url.PathUnescape(name); err == nil {
+		name = decoded
+	}
+	if name == "" || name == "." {
+		return ""
+	}
+	return name
 }
 
 func concatListFile(ctx *core.ExecContext, inputs []string) (string, error) {

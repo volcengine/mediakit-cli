@@ -19,10 +19,10 @@
 |------|----------|------|------|--------|------|
 | video_url | `--video-url` | string | 是 | - | 输入视频。String 类型，支持http://xxx或https://xxx格式 URL |
 | sub_image_url | `--sub-image-url` | string | 是 | - | 图片URL。支持http://xxx或https://xxx格式 URL |
-| sub_image_height | `--sub-image-height` | string | 否 | 5% | 图片的高度，字符串类型，支持具体像素值（如 '100'）或百分比（如 '20%'，相对于视频高度）。 |
-| sub_image_width | `--sub-image-width` | string | 否 | 10% | 图片的宽度，字符串类型，支持具体像素值（如 '100'）或百分比（如 '20%'，相对于视频高度）。 |
-| sub_image_pos_x | `--sub-image-pos-x` | string | 否 | 85% | 图片在水平方向（X 轴）的位置，以视频左上角为原点，字符串类型，支持具体像素值（如 '100'）或百分比（如 '20%'）。例如值为 '0' 时，表示处于最左侧。 |
-| sub_image_pos_y | `--sub-image-pos-y` | string | 否 | 90% | 图片在垂直方向（Y 轴）的位置，以视频左上角为原点，字符串类型，支持具体像素值（如 '100'）或百分比（如 '20%'）。例如值为 '0' 时，表示处于最上侧。 |
+| sub_image_height | `--sub-image-height` | string | 否 | - | 图片的高度，字符串类型，支持具体像素值（如 '100'）或百分比（如 '20%'，相对于视频高度）。不传时 local 模式保持原始图片高度。 |
+| sub_image_width | `--sub-image-width` | string | 否 | - | 图片的宽度，字符串类型，支持具体像素值（如 '100'）或百分比（如 '20%'，相对于视频宽度）。不传时 local 模式保持原始图片宽度。 |
+| sub_image_pos_x | `--sub-image-pos-x` | string | 否 | 85% | 图片左上角在水平方向（X 轴）的位置，以视频左上角为原点，百分比表示视频宽度的绝对位置；超出画面时自然截断。 |
+| sub_image_pos_y | `--sub-image-pos-y` | string | 否 | 90% | 图片左上角在垂直方向（Y 轴）的位置，以视频左上角为原点，百分比表示视频高度的绝对位置；超出画面时自然截断。 |
 | start_time | `--start-time` | number | 否 | - | 图片的开始时间，单位：秒。不传默认同视频开始时间 |
 | end_time | `--end-time` | number | 否 | - | 图片的结束时间，单位：秒。注意：如果设置的开始/结束时间超出原始视频时长，输出视频长度将以该结束时间为准，超出部分以黑屏形式延续。不传默认同视频结束时间 |
 | callback_args | `--callback-args` | string | 否 | - | 可选，回调参数 |
@@ -42,6 +42,12 @@ mediakit-cli editing add-image-to-video \
   --callback-args sample-callback-args \
   --client-token demo-client-token
 ```
+
+## Local 行为说明
+
+- 不传 `--sub-image-width` / `--sub-image-height` 时，local 模式保持图片原始尺寸，与云端默认效果对齐
+- 传入 `--sub-image-width` / `--sub-image-height` 时，local 模式按指定像素或百分比缩放图片
+- `--sub-image-pos-x 95% --sub-image-pos-y 95%` 表示图片左上角位于视频宽/高的 95% 位置，右侧或底部超出画面的部分会被截断
 
 ## 输出格式
 ```json
