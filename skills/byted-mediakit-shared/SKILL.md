@@ -1,6 +1,7 @@
 ---
 name: byted-mediakit-shared
 version: '1.0.0'
+license: 'MIT'
 description: 'mediakit-cli 共享：环境检查、初始化配置、命令结构、认证配置、异步任务响应与错误处理。'
 permissions:
   - shell
