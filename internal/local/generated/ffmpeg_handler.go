@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mediakit-cli/internal/local/core"
+	"mediakit-cli/internal/output"
 )
 
 // FFmpegPlan describes a generated local ffmpeg execution and its JSON result.
@@ -353,12 +354,21 @@ func preferredExtFromPath(source string, fallback string) string {
 }
 
 func outputPathFor(ctx *core.ExecContext, command string, ext string) (string, error) {
+	outputWriter, err := output.NewWriter(ctx.OutputDir)
+	if err != nil {
+		return "", err
+	}
+
 	// 如果用户指定了完整输出文件路径，直接使用
 	if ctx.OutputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(ctx.OutputFile), 0o755); err != nil {
-			return "", err
+		outputPath, resolveErr := outputWriter.ResolvePath(ctx.OutputFile)
+		if resolveErr != nil {
+			return "", resolveErr
 		}
-		return ctx.OutputFile, nil
+		if mkdirErr := os.MkdirAll(filepath.Dir(outputPath), 0o755); mkdirErr != nil {
+			return "", mkdirErr
+		}
+		return outputPath, nil
 	}
 
 	command = strings.TrimSpace(strings.ReplaceAll(command, "_", "-"))
@@ -378,21 +388,27 @@ func outputPathFor(ctx *core.ExecContext, command string, ext string) (string, e
 		filename = fmt.Sprintf("%s-%d%s", command, time.Now().UnixNano(), ext)
 	}
 
-	outputPath := filepath.Join(ctx.OutputDir, filename)
+	outputPath, err := outputWriter.ResolvePath(filename)
+	if err != nil {
+		return "", err
+	}
 
 	// 文件已存在则加 6 位随机串
-	if _, err := os.Stat(outputPath); err == nil {
+	if _, statErr := os.Stat(outputPath); statErr == nil {
 		randSuffix := fmt.Sprintf("%06d", rand.Intn(1000000))
 		if inputName != "" {
 			filename = fmt.Sprintf("%s_%s_%s%s", inputName, command, randSuffix, ext)
 		} else {
 			filename = fmt.Sprintf("%s-%s%s", command, randSuffix, ext)
 		}
-		outputPath = filepath.Join(ctx.OutputDir, filename)
+		outputPath, err = outputWriter.ResolvePath(filename)
+		if err != nil {
+			return "", err
+		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return "", err
+	if mkdirErr := os.MkdirAll(filepath.Dir(outputPath), 0o755); mkdirErr != nil {
+		return "", mkdirErr
 	}
 	return outputPath, nil
 }
@@ -423,17 +439,35 @@ func extractInputBaseName(params map[string]any) string {
 // fileBaseName 提取路径或 URL 的文件名（不含扩展名）
 func fileBaseName(path string) string {
 	// 尝试解析为 URL
-	if u, err := url.Parse(path); err == nil && u.Path != "" {
-		path = u.Path
+	if u, err := url.Parse(path); err == nil {
+		switch {
+		case u.RawPath != "":
+			path = u.RawPath
+		case u.EscapedPath() != "":
+			path = u.EscapedPath()
+		case u.Path != "":
+			path = u.Path
+		}
 	}
+
+	// 先截取最后一段，再解码，防止编码后的分隔符和 .. 重新引入目录语义
+	path = strings.ReplaceAll(path, "\\", "/")
 	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	// URL 解码（如 %E5%8F%A3%E6%92%AD -> 口播）
-	if decoded, err := url.PathUnescape(name); err == nil {
-		name = decoded
+	if decoded, err := url.PathUnescape(base); err == nil {
+		base = decoded
 	}
-	if name == "" || name == "." {
+	base = strings.ReplaceAll(base, "\\", "/")
+	if strings.ContainsAny(base, `/\`) {
+		return ""
+	}
+	base = filepath.Base(filepath.Clean(base))
+
+	ext := filepath.Ext(base)
+	name := strings.TrimSpace(strings.TrimSuffix(base, ext))
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		return ""
 	}
 	return name
