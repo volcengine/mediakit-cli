@@ -2,7 +2,7 @@
   "name": "@volcengine/mediakit-cli",
   "version": "0.1.0",
   "description": "MediaKit CLI with multi-platform binary distribution via npm",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "bin": {
     "mediakit-cli": "scripts/run.js"
   },
