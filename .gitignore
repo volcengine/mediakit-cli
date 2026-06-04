@@ -1,0 +1,28 @@
+.DS_Store
+
+# Go and local build outputs
+.mediakit/
+dist/
+build/
+coverage.out
+
+# npm and local package artifacts
+node_modules/
+bin/
+*.tgz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor and environment files
+.idea/
+.vscode/
+.env
+.env.*
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
