@@ -13,8 +13,8 @@
     "README.md",
     "Open Source Notice.txt",
     "scripts",
-    "bin",
-    "skills"
+    "skills",
+    "checksums.txt"
   ],
   "keywords": [
     "mediakit",
