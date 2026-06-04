@@ -68,4 +68,10 @@ jobs:
       - name: Publish npm package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$PACKAGE_VERSION" == *-* ]]; then
+            npm publish --access public --tag beta
+          else
+            npm publish --access public
+          fi
