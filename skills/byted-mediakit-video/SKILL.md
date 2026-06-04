@@ -1,6 +1,7 @@
 ---
 name: byted-mediakit-video
 version: "1.0.0"
+license: "MIT"
 description: "视频处理，涵盖视频画质增强、视频理解、字幕擦除等能力。包含能力：enhance-video, erase-video-subtitle-pro。当用户需要使用 video 域的 MediaKit CLI 能力时触发。"
 permissions:
   - shell

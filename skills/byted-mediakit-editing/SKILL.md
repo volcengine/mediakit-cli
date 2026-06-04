@@ -1,6 +1,7 @@
 ---
 name: byted-mediakit-editing
 version: "1.0.0"
+license: "MIT"
 description: "音视频剪辑，涵盖音视频拼接、裁剪、合成等能力。包含能力：add-image-to-video, add-subtitle-to-video, adjust-video-speed, concat-audio, concat-video, extract-audio, flip-video, image-to-video, mux-audio-video, trim-audio, trim-video。当用户需要使用 editing 域的 MediaKit CLI 能力时触发。"
 permissions:
   - shell
