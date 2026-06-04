@@ -21,7 +21,19 @@ func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "mediakit-cli",
 		Short:             "MediaKit command line interface",
-		Long:              "MediaKit CLI provides system commands, domain navigation, and generated capability commands.",
+		Long: `MediaKit CLI provides system commands, domain navigation, and generated capability commands.
+
+AI Agent Skills:
+  mediakit-cli pairs with AI agent skills (Claude Code, etc.) that
+  teach the agent MediaKit CLI patterns, best practices, and workflows.
+
+  Install all skills:
+    npx skills add volcengine/mediakit-cli -g -y
+
+  Or pick specific domains:
+    npx skills add volcengine/mediakit-cli -s byted-mediakit-editing -y
+    npx skills add volcengine/mediakit-cli -s byted-mediakit-video -y
+    npx skills add volcengine/mediakit-cli -s byted-mediakit-shared -y`,
 		SilenceUsage:      true,
 		DisableAutoGenTag: true,
 		Version:           buildinfo.Version,
