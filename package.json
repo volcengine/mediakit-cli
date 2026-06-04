@@ -1,6 +1,6 @@
 {
   "name": "@volcengine/mediakit-cli",
-  "version": "0.1.1-beta.0",
+  "version": "0.1.1",
   "description": "MediaKit CLI with multi-platform binary distribution via npm",
   "license": "MIT",
   "bin": {
