@@ -31,6 +31,25 @@ VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" \
 curl -fsSL https://raw.githubusercontent.com/volcengine/mediakit-cli/main/scripts/install.sh | bash
 ```
 
+## AI Agent Skills
+
+`mediakit-cli` pairs with AI agent skills (Claude Code, etc.) that
+teach the agent MediaKit CLI patterns, best practices, and workflows.
+
+Install all skills:
+
+```bash
+npx skills add volcengine/mediakit-cli -g -y
+```
+
+Or pick specific domains:
+
+```bash
+npx skills add volcengine/mediakit-cli -s byted-mediakit-editing -y
+npx skills add volcengine/mediakit-cli -s byted-mediakit-video -y
+npx skills add volcengine/mediakit-cli -s byted-mediakit-shared -y
+```
+
 ## Commands
 
 ```bash
