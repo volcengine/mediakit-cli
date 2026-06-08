@@ -87,6 +87,7 @@ func (c *Client) newRequest(method string, path string, query map[string]any, bo
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-surface", resolveSurface(c.Surface))
 	req.Header.Set("x-runtime", resolveRuntime(c.Runtime))
+	req.Header.Set("X-Amk-Task-Source", "cli")
 	if c.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
