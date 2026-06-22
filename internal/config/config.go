@@ -19,6 +19,7 @@ const (
 	ConfigDirName        = ".mediakit"
 	ConfigFileName       = "config.json"
 	EnvCacheName         = "env_cache.json"
+	UploadCacheName      = "upload_cache.json"
 	DefaultOutputDirName = "temp"
 	DefaultEndpoint      = "https://amk.cn-beijing.volces.com"
 	EnvAPIKey            = "MEDIAKIT_API_KEY"
@@ -85,6 +86,10 @@ func ConfigFile(home string) string {
 
 func EnvCacheFile(home string) string {
 	return filepath.Join(ConfigDir(home), EnvCacheName)
+}
+
+func UploadCacheFile(home string) string {
+	return filepath.Join(ConfigDir(home), UploadCacheName)
 }
 
 func DefaultOutputPath(home string) string {

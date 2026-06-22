@@ -1,8 +1,11 @@
 package generated
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +23,46 @@ type LocalWarning struct {
 type LocalInputRef struct {
 	Original  string `json:"original"`
 	LocalPath string `json:"local_path"`
+}
+
+type ffprobeAudioMetadata struct {
+	Format struct {
+		FormatName string `json:"format_name"`
+		BitRate    string `json:"bit_rate"`
+		Duration   string `json:"duration"`
+		Size       string `json:"size"`
+	} `json:"format"`
+	Streams []struct {
+		CodecName  string `json:"codec_name"`
+		Duration   string `json:"duration"`
+		SampleRate string `json:"sample_rate"`
+		BitRate    string `json:"bit_rate"`
+		Channels   int    `json:"channels"`
+	} `json:"streams"`
+}
+
+type ffprobeMediaMetadata struct {
+	Format struct {
+		FormatName string `json:"format_name"`
+		BitRate    string `json:"bit_rate"`
+		Duration   string `json:"duration"`
+		Size       string `json:"size"`
+	} `json:"format"`
+	Streams []struct {
+		CodecType      string `json:"codec_type"`
+		CodecName      string `json:"codec_name"`
+		Width          int    `json:"width"`
+		Height         int    `json:"height"`
+		Duration       string `json:"duration"`
+		BitRate        string `json:"bit_rate"`
+		AvgFrameRate   string `json:"avg_frame_rate"`
+		RFrameRate     string `json:"r_frame_rate"`
+		ColorTransfer  string `json:"color_transfer"`
+		ColorPrimaries string `json:"color_primaries"`
+		ColorSpace     string `json:"color_space"`
+		SampleRate     string `json:"sample_rate"`
+		Channels       int    `json:"channels"`
+	} `json:"streams"`
 }
 
 func materializeLocalInput(ctx *core.ExecContext, value string) (LocalInputRef, error) {
@@ -273,6 +316,362 @@ func buildMuxAudioVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	return &FFmpegPlan{Args: args, Result: videoResponse("mux-audio-video", out, []LocalInputRef{video, audio}, warnings, map[string]any{})}, nil
 }
 
+func buildFadeVideoAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	videoURL, err := requiredStringParam(ctx.Params, "video_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, videoURL)
+	if err != nil {
+		return nil, err
+	}
+	if !hasAudioStream(input.LocalPath) {
+		return nil, fmt.Errorf("fade-video-audio 需要输入视频包含音频流")
+	}
+	fadeIn, hasFadeIn, err := optionalFloatParam(ctx.Params, "fade_in_duration")
+	if err != nil {
+		return nil, err
+	}
+	if !hasFadeIn {
+		fadeIn = 1
+	}
+	fadeOut, hasFadeOut, err := optionalFloatParam(ctx.Params, "fade_out_duration")
+	if err != nil {
+		return nil, err
+	}
+	if !hasFadeOut {
+		fadeOut = 1
+	}
+	if fadeIn < 0 {
+		return nil, fmt.Errorf("fade_in_duration 必须大于等于 0")
+	}
+	if fadeOut < 0 {
+		return nil, fmt.Errorf("fade_out_duration 必须大于等于 0")
+	}
+	out, err := outputPath(ctx, "fade-video-audio", ".mp4")
+	if err != nil {
+		return nil, err
+	}
+	if fadeIn == 0 && fadeOut == 0 {
+		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out}
+		return &FFmpegPlan{Args: args, Result: videoResponse("fade-video-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+	}
+	duration, err := mediaDuration(input.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	filter := audioFadeFilter(fadeIn, fadeOut, duration)
+	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]" + filter + "[outa]", "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", out}
+	return &FFmpegPlan{Args: args, Result: videoResponse("fade-video-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+}
+
+func buildAdjustVideoVolumePlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	videoURL, err := requiredStringParam(ctx.Params, "video_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, videoURL)
+	if err != nil {
+		return nil, err
+	}
+	if !hasAudioStream(input.LocalPath) {
+		return nil, fmt.Errorf("adjust-video-volume 需要输入视频包含音频流")
+	}
+	volume, hasVolume, err := optionalFloatParam(ctx.Params, "volume")
+	if err != nil {
+		return nil, err
+	}
+	if !hasVolume {
+		volume = 1
+	}
+	if volume < 0 || volume > 4 {
+		return nil, fmt.Errorf("volume 取值范围为 0 到 4")
+	}
+	out, err := outputPath(ctx, "adjust-video-volume", ".mp4")
+	if err != nil {
+		return nil, err
+	}
+	if volume == 1 {
+		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out}
+		return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-volume", out, []LocalInputRef{input}, warnings, map[string]any{"volume": volume})}, nil
+	}
+	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]volume=" + formatFloat(volume) + "[outa]", "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", out}
+	return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-volume", out, []LocalInputRef{input}, warnings, map[string]any{"volume": volume})}, nil
+}
+
+func buildFadeAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, audioURL)
+	if err != nil {
+		return nil, err
+	}
+	fadeIn, hasFadeIn, err := optionalFloatParam(ctx.Params, "fade_in_duration")
+	if err != nil {
+		return nil, err
+	}
+	if !hasFadeIn {
+		fadeIn = 1
+	}
+	fadeOut, hasFadeOut, err := optionalFloatParam(ctx.Params, "fade_out_duration")
+	if err != nil {
+		return nil, err
+	}
+	if !hasFadeOut {
+		fadeOut = 1
+	}
+	if fadeIn < 0 {
+		return nil, fmt.Errorf("fade_in_duration 必须大于等于 0")
+	}
+	if fadeOut < 0 {
+		return nil, fmt.Errorf("fade_out_duration 必须大于等于 0")
+	}
+	out, err := outputPath(ctx, "fade-audio", ".mp3")
+	if err != nil {
+		return nil, err
+	}
+	if fadeIn == 0 && fadeOut == 0 {
+		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-vn", "-c:a", "libmp3lame", "-b:a", "128k", out}
+		return &FFmpegPlan{Args: args, Result: audioResponse("fade-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+	}
+	duration, err := mediaDuration(input.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	filter := audioFadeFilter(fadeIn, fadeOut, duration)
+	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]" + filter + "[outa]", "-map", "[outa]", "-vn", "-c:a", "libmp3lame", "-b:a", "128k", out}
+	return &FFmpegPlan{Args: args, Result: audioResponse("fade-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+}
+
+func buildAdjustAudioSpeedPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, audioURL)
+	if err != nil {
+		return nil, err
+	}
+	speed, hasSpeed, err := optionalFloatParam(ctx.Params, "speed")
+	if err != nil {
+		return nil, err
+	}
+	if !hasSpeed {
+		speed = 1
+	}
+	if speed < 0.1 || speed > 4 {
+		return nil, fmt.Errorf("speed 取值范围为 0.1 到 4")
+	}
+	out, err := outputPath(ctx, "adjust-audio-speed", ".m4a")
+	if err != nil {
+		return nil, err
+	}
+	if speed == 1 {
+		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-vn", "-c:a", "aac", "-b:a", "128k", out}
+		return &FFmpegPlan{Args: args, Result: audioResponse("adjust-audio-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+	}
+	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]" + atempoChain(speed) + "[outa]", "-map", "[outa]", "-vn", "-c:a", "aac", "-b:a", "128k", out}
+	return &FFmpegPlan{Args: args, Result: audioResponse("adjust-audio-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+}
+
+func buildMixAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	urls, err := requiredStringListParam(ctx.Params, "audio_urls")
+	if err != nil {
+		return nil, err
+	}
+	if len(urls) > 100 {
+		return nil, fmt.Errorf("audio_urls 最多支持 100 个元素")
+	}
+	inputs := make([]LocalInputRef, 0, len(urls))
+	for _, url := range urls {
+		input, err := materializeLocalInput(ctx, url)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, input)
+	}
+	out, err := outputPath(ctx, "mix-audio", ".mp3")
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"-y", "-hide_banner"}
+	filterInputs := make([]string, 0, len(inputs))
+	for index, input := range inputs {
+		args = append(args, "-i", input.LocalPath)
+		filterInputs = append(filterInputs, fmt.Sprintf("[%d:a]", index))
+	}
+	filter := strings.Join(filterInputs, "") + fmt.Sprintf("amix=inputs=%d:duration=longest:dropout_transition=0[outa]", len(inputs))
+	args = append(args, "-filter_complex", filter, "-map", "[outa]", "-vn", "-c:a", "libmp3lame", "-b:a", "128k", out)
+	return &FFmpegPlan{Args: args, Result: audioResponse("mix-audio", out, inputs, warnings, map[string]any{"input_count": len(inputs)})}, nil
+}
+
+func buildProbeAudioMetadataResult(ctx *core.ExecContext) (map[string]any, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, audioURL)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := probeAudioMetadata(input.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	md5Value, _ := fileMD5(input.LocalPath)
+	formatMeta := map[string]any{
+		"md5":       nullableString(md5Value),
+		"container": nullableString(metadata.Format.FormatName),
+		"bitrate":   nullableFloatString(metadata.Format.BitRate),
+		"duration":  nullableFloatString(metadata.Format.Duration),
+		"size":      nullableFloatString(metadata.Format.Size),
+	}
+	var audioStreamMeta any
+	if len(metadata.Streams) > 0 {
+		stream := metadata.Streams[0]
+		audioStreamMeta = map[string]any{
+			"codec":       nullableString(stream.CodecName),
+			"duration":    nullableFloatString(stream.Duration),
+			"sample_rate": nullableFloatString(stream.SampleRate),
+			"bitrate":     nullableFloatString(stream.BitRate),
+			"channels":    nullableInt(stream.Channels),
+		}
+	}
+	return map[string]any{
+		"format_meta":       formatMeta,
+		"audio_stream_meta": audioStreamMeta,
+	}, nil
+}
+
+func buildProbeVideoMetadataResult(ctx *core.ExecContext) (map[string]any, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	videoURL, err := requiredStringParam(ctx.Params, "video_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, videoURL)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := probeMediaMetadata(input.LocalPath)
+	if err != nil {
+		return nil, err
+	}
+	md5Value, _ := fileMD5(input.LocalPath)
+	formatMeta := map[string]any{
+		"md5":       nullableString(md5Value),
+		"container": nullableString(metadata.Format.FormatName),
+		"bitrate":   nullableFloatString(metadata.Format.BitRate),
+		"duration":  nullableFloatString(metadata.Format.Duration),
+		"size":      nullableFloatString(metadata.Format.Size),
+	}
+	var videoStreamMeta any
+	var audioStreamMeta any
+	for _, stream := range metadata.Streams {
+		switch stream.CodecType {
+		case "video":
+			if videoStreamMeta == nil {
+				videoStreamMeta = map[string]any{
+					"codec":         nullableString(stream.CodecName),
+					"width":         nullableInt(stream.Width),
+					"height":        nullableInt(stream.Height),
+					"duration":      nullableFloatString(stream.Duration),
+					"bitrate":       nullableFloatString(stream.BitRate),
+					"fps":           nullableFrameRate(stream.AvgFrameRate, stream.RFrameRate),
+					"dynamic_range": dynamicRange(stream.ColorTransfer, stream.ColorPrimaries, stream.ColorSpace),
+				}
+			}
+		case "audio":
+			if audioStreamMeta == nil {
+				audioStreamMeta = map[string]any{
+					"codec":       nullableString(stream.CodecName),
+					"duration":    nullableFloatString(stream.Duration),
+					"sample_rate": nullableFloatString(stream.SampleRate),
+					"bitrate":     nullableFloatString(stream.BitRate),
+					"channels":    nullableInt(stream.Channels),
+				}
+			}
+		}
+	}
+	return map[string]any{
+		"format_meta":       formatMeta,
+		"video_stream_meta": videoStreamMeta,
+		"audio_stream_meta": audioStreamMeta,
+	}, nil
+}
+
+func buildMatteGreenscreenVideoResult(ctx *core.ExecContext) (map[string]any, error) {
+	warnings := []LocalWarning{}
+	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
+	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
+
+	videoURL, err := requiredStringParam(ctx.Params, "video_url")
+	if err != nil {
+		return nil, err
+	}
+	input, err := materializeLocalInput(ctx, videoURL)
+	if err != nil {
+		return nil, err
+	}
+	format := strings.ToUpper(valueOrDefault(ctx.Params, "format", "WEBM"))
+	if format != "MOV" {
+		return nil, fmt.Errorf("matte-greenscreen-video 本地模式仅支持 --format MOV；WEBM 透明输出请使用 cloud 模式")
+	}
+	out, err := outputPath(ctx, "matte-greenscreen-video", ".mov")
+	if err != nil {
+		return nil, err
+	}
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-i", input.LocalPath,
+		"-vf", "chromakey=0x00ff00:0.18:0.08,format=yuva444p10le",
+		"-map", "0:v:0",
+		"-an",
+		"-c:v", "prores_ks",
+		"-profile:v", "4",
+		"-pix_fmt", "yuva444p10le",
+		out,
+	}
+	if _, err := core.RunFFmpeg(args...); err != nil {
+		return nil, err
+	}
+	result := map[string]any{"video_url": out}
+	if duration, err := mediaDuration(out); err == nil {
+		result["duration"] = duration
+	}
+	return result, nil
+}
+
 func buildExtractAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	warnings := []LocalWarning{}
 	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
@@ -397,6 +796,144 @@ func hasAudioStream(filePath string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(raw)) == "audio"
+}
+
+func mediaDuration(filePath string) (float64, error) {
+	info, err := probeMediaInfo(filePath)
+	if err != nil {
+		return 0, err
+	}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(info.Format.Duration), 64)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("无法读取输入媒体时长")
+	}
+	return duration, nil
+}
+
+func audioFadeFilter(fadeIn float64, fadeOut float64, duration float64) string {
+	filters := []string{}
+	if fadeIn > 0 {
+		filters = append(filters, "afade=t=in:st=0:d="+formatFloat(fadeIn))
+	}
+	if fadeOut > 0 {
+		start := duration - fadeOut
+		if start < 0 {
+			start = 0
+		}
+		filters = append(filters, "afade=t=out:st="+formatFloat(start)+":d="+formatFloat(fadeOut))
+	}
+	return strings.Join(filters, ",")
+}
+
+func probeAudioMetadata(filePath string) (ffprobeAudioMetadata, error) {
+	var metadata ffprobeAudioMetadata
+	raw, err := core.RunFFprobe(
+		"-v", "error",
+		"-select_streams", "a:0",
+		"-show_entries", "format=format_name,bit_rate,duration,size:stream=codec_name,duration,sample_rate,bit_rate,channels",
+		"-of", "json",
+		filePath,
+	)
+	if err != nil {
+		return metadata, err
+	}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return metadata, err
+	}
+	return metadata, nil
+}
+
+func probeMediaMetadata(filePath string) (ffprobeMediaMetadata, error) {
+	var metadata ffprobeMediaMetadata
+	raw, err := core.RunFFprobe(
+		"-v", "error",
+		"-show_entries", "format=format_name,bit_rate,duration,size:stream=codec_type,codec_name,width,height,duration,bit_rate,avg_frame_rate,r_frame_rate,color_transfer,color_primaries,color_space,sample_rate,channels",
+		"-of", "json",
+		filePath,
+	)
+	if err != nil {
+		return metadata, err
+	}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return metadata, err
+	}
+	return metadata, nil
+}
+
+func fileMD5(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func nullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableFloatString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil
+	}
+	return parsed
+}
+
+func nullableInt(value int) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func nullableFrameRate(primary string, fallback string) any {
+	if value := parseFrameRate(primary); value != nil {
+		return value
+	}
+	return parseFrameRate(fallback)
+}
+
+func parseFrameRate(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "0/0" || strings.EqualFold(value, "N/A") {
+		return nil
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) == 2 {
+		numerator, numErr := strconv.ParseFloat(parts[0], 64)
+		denominator, denErr := strconv.ParseFloat(parts[1], 64)
+		if numErr != nil || denErr != nil || denominator == 0 {
+			return nil
+		}
+		return numerator / denominator
+	}
+	return nullableFloatString(value)
+}
+
+func dynamicRange(colorTransfer string, colorPrimaries string, colorSpace string) any {
+	value := strings.ToLower(strings.Join([]string{colorTransfer, colorPrimaries, colorSpace}, " "))
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if strings.Contains(value, "smpte2084") || strings.Contains(value, "arib-std-b67") || strings.Contains(value, "bt2020") {
+		return "HDR"
+	}
+	return "SDR"
 }
 
 func atempoChain(speed float64) string {

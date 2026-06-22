@@ -177,6 +177,12 @@ mediakit-cli shared query-task --task-id <task_id>
 - local 模式下不支持 query-task
 - 当前本轮能力以云端执行为主；如需显式声明，请优先使用 `--cloud`
 
+### Cloud 模式媒体输入补充
+
+- 当命令以 `--cloud` 或 `cloud-first` 策略执行时，媒体输入参数（如 `video_url`、`audio_url`、`image_url`、`subtitle_url`、`sub_image_url` 及对应数组/对象子字段）可传入 `http://` / `https://` URL、`mediakit://...` file_id 或本地文件路径
+- `http://` / `https://` URL 与 `mediakit://...` file_id 会原样提交；本地文件路径会由 CLI 先上传为 `mediakit://...` file_id，再提交给云端工具
+- 各工具 reference 中的参数说明来自 APIHub/OpenAPI 原始字段描述；若其中写有公网 URL 或 HTTP/HTTPS URL，表示云端 API 最终接收的资源形态，不限制 CLI cloud 模式的本地路径预处理能力
+
 ### Local 模式补充
 
 - 本地输出目录优先级：`--output-path` > `MEDIAKIT_OUTPUT_PATH` > config `output_path` > `~/.mediakit/temp`

@@ -41,6 +41,10 @@ func Execute(cmd *cobra.Command, command string, params map[string]any, apiKey s
 	}
 
 	client := NewClient(apiKey, endpoint, surface, runtime)
+	requestParams, err = materializeCloudMediaInputs(client, normalizedCommand, requestParams)
+	if err != nil {
+		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
+	}
 	response, err := client.Call(normalizedCommand, requestParams)
 	if err != nil {
 		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
@@ -169,7 +173,43 @@ func formatCommandResponse(command string, response map[string]any) map[string]a
 	if command == queryTaskCommand {
 		return queryTaskResponse(response)
 	}
+	if isSyncCommand(command) {
+		return syncToolResponse(response)
+	}
 	return asyncTaskResponse(response)
+}
+
+func isSyncCommand(command string) bool {
+	api, ok := apiInfoRegistry[command]
+	if !ok {
+		return false
+	}
+	return strings.HasPrefix(api.Path, "/api/v1/tools-sync/")
+}
+
+func syncToolResponse(result map[string]any) map[string]any {
+	if len(result) == 0 {
+		return map[string]any{}
+	}
+
+	output := map[string]any{}
+	if taskID := strings.TrimSpace(fmt.Sprint(result["task_id"])); taskID != "" && taskID != "<nil>" {
+		output["task_id"] = taskID
+	}
+	if requestID := strings.TrimSpace(fmt.Sprint(result["request_id"])); requestID != "" && requestID != "<nil>" {
+		output["request_id"] = requestID
+	}
+	if status := strings.TrimSpace(fmt.Sprint(result["status"])); status != "" && status != "<nil>" {
+		output["status"] = status
+	}
+	taskResult, ok := result["result"].(map[string]any)
+	if !ok {
+		return output
+	}
+	for key, value := range taskResult {
+		output[key] = value
+	}
+	return output
 }
 
 func asyncTaskResponse(result map[string]any) map[string]any {
