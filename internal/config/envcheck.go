@@ -99,6 +99,8 @@ func probeAllowedFFmpegDependency(ffmpegAvailable bool, dep string) ToolStatus {
 		return probeFFmpegOutput(dep, []string{"-hide_banner", "-demuxers"}, " concat")
 	case "libmp3lame":
 		return probeFFmpegOutput(dep, []string{"-hide_banner", "-encoders"}, "libmp3lame")
+	case "prores_ks":
+		return probeFFmpegOutput(dep, []string{"-hide_banner", "-encoders"}, "prores_ks")
 	case "libass":
 		return probeFFmpegOutput(dep, []string{"-hide_banner", "-filters"}, " ass")
 	case "libpng":

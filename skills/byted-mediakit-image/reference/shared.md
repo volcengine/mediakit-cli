@@ -24,12 +24,12 @@ mediakit-cli --version
 
 - 环境变量/配置文件：`MEDIAKIT_API_KEY`、`MEDIAKIT_ENDPOINT`、`MEDIAKIT_SURFACE`、`MEDIAKIT_RUNTIME`
 
-| 变量                | 必填         | 说明                                                                                                                    |
-| ------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `MEDIAKIT_API_KEY`  | 云端模式必填 | API 认证 Token                                                                                                          |
-| `MEDIAKIT_ENDPOINT` | 否           | API 访问点                                                                                                              |
-| `MEDIAKIT_SURFACE`  | 否           | 请求来源 Header `x-surface`；默认 `cli`，Skill 建议 `skill`，Plugin 建议 `plugin`，最终上报 `cli/skill` 或 `cli/plugin` |
-| `MEDIAKIT_RUNTIME`  | 否           | 请求来源 Header `x-runtime`；按宿主设置为 `claude`、`arkclaw` 等，未配置时回退环境探测或 `unknown`                      |
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `MEDIAKIT_API_KEY` | 云端模式必填 | API 认证 Token |
+| `MEDIAKIT_ENDPOINT` | 否 | API 访问点 |
+| `MEDIAKIT_SURFACE` | 否 | 请求来源 Header `x-surface`；默认 `cli`，Skill 建议 `skill`，Plugin 建议 `plugin`，最终上报 `cli/skill` 或 `cli/plugin` |
+| `MEDIAKIT_RUNTIME` | 否 | 请求来源 Header `x-runtime`；按宿主设置为 `claude`、`arkclaw` 等，未配置时回退环境探测或 `unknown` |
 
 任一必填项缺失时，终止执行并输出所有缺失项的列表及修复建议。
 
@@ -105,7 +105,7 @@ mediakit-cli {domain} {tool} --schema
 mediakit-cli --local {domain} {tool} --schema
 ```
 
-当前产物覆盖的 domain 包括：`editing`, `video`。
+当前产物覆盖的 domain 包括：`editing`, `video`, `audio`, `image`。
 
 ### Schema 发现
 
@@ -183,9 +183,9 @@ mediakit-cli shared query-task --task-id <task_id>
 
 ## 幂等参数维护
 
-| 参数            | 作用         | 维护建议                                               |
-| --------------- | ------------ | ------------------------------------------------------ |
-| `client_token`  | 主动控制幂等 | 请求重试时复用同一值；强制重新执行时传新的唯一值       |
+| 参数 | 作用 | 维护建议 |
+|------|------|----------|
+| `client_token` | 主动控制幂等 | 请求重试时复用同一值；强制重新执行时传新的唯一值 |
 | `callback_args` | 透传回调参数 | 建议与 `client_token` 一起维护，便于回调对账与重试追踪 |
 
 补充规则：
@@ -195,8 +195,8 @@ mediakit-cli shared query-task --task-id <task_id>
 
 ## 轮询策略
 
-| 参数                    | 描述                   | 默认值 |
-| ----------------------- | ---------------------- | ------ |
-| `poll-interval-seconds` | 轮询间隔               | 10s    |
-| `max-poll-attempts`     | 轮询次数，0 代表不查询 | 0      |
-| `poll-complete`         | 阻塞至终态             | -      |
+| 参数 | 描述 | 默认值 |
+|------|------|--------|
+| `poll-interval-seconds` | 轮询间隔 | 10s |
+| `max-poll-attempts` | 轮询次数，0 代表不查询 | 0 |
+| `poll-complete` | 阻塞至终态 | - |

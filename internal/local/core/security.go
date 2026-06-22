@@ -42,6 +42,7 @@ func DefaultFFmpegPolicy() FFmpegPolicy {
 			"-ar":          {},
 			"-ac":          {},
 			"-pix_fmt":     {},
+			"-profile:v":   {},
 			"-movflags":    {},
 			"-preset":      {},
 			"-crf":         {},
