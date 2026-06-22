@@ -77,6 +77,7 @@ func AllowedDependencyNames() []string {
 		"h264_videotoolbox",
 		"demuxer",
 		"libmp3lame",
+		"prores_ks",
 		"libass",
 		"libfreetype",
 		"libfontconfig",

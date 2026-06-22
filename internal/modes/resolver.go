@@ -214,6 +214,8 @@ func localDependencyInstallHint(dep string) string {
 		return "请安装或切换到包含 concat demuxer 的 FFmpeg"
 	case "libmp3lame":
 		return "请安装或切换到包含 libmp3lame 编码器的 FFmpeg"
+	case "prores_ks":
+		return "请安装或切换到包含 prores_ks 编码器的 FFmpeg"
 	case "libass":
 		return "请安装或切换到包含 subtitles/ass 字幕滤镜的 FFmpeg"
 	case "libfreetype", "libfontconfig", "libfribidi", "libharfbuzz":
