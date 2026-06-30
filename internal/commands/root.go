@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"time"
-
 	buildinfo "mediakit-cli/internal/build"
 	"mediakit-cli/internal/updatecheck"
 
@@ -55,7 +53,6 @@ AI Agent Skills:
 			updatecheck.StartAsync()
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
-			updatecheck.WaitForResult(100 * time.Millisecond)
 			updatecheck.PrintStderrNag(cmd.ErrOrStderr())
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,6 +77,7 @@ AI Agent Skills:
 	cmd.AddCommand(newConfigCmd())
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newUpdateCmd())
+	cmd.AddCommand(newUpdateRefreshCmd())
 
 	for _, domainCmd := range newGeneratedDomainCommands() {
 		cmd.AddCommand(domainCmd)
