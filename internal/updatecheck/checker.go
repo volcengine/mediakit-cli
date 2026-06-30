@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	cliconfig "mediakit-cli/internal/config"
 	"mediakit-cli/internal/build"
+	cliconfig "mediakit-cli/internal/config"
 )
 
 const (
@@ -19,6 +19,16 @@ const (
 	PackageName    = "@volcengine/mediakit-cli"
 	EnvDisable     = "MEDIAKIT_DISABLE_UPDATE_CHECK"
 	EnvCI          = "CI"
+
+	// InternalRefreshCommand is the hidden subcommand the detached refresh
+	// subprocess runs. It only fetches the latest version and writes the cache.
+	InternalRefreshCommand = "__update-refresh"
+	// envInternalRefresh marks the detached subprocess so it never re-spawns.
+	envInternalRefresh = "MEDIAKIT_INTERNAL_REFRESH"
+
+	// refreshFetchTimeout bounds the registry fetch inside the detached
+	// subprocess. It can be generous since it never blocks a user command.
+	refreshFetchTimeout = 5 * time.Second
 )
 
 type Result struct {
@@ -30,33 +40,111 @@ type Result struct {
 
 var checkResult atomic.Value // *Result
 
+// StartAsync wires the non-blocking update notice for normal commands.
+// It only reads the local cache synchronously: a fresh real result is stored
+// for the stdout/stderr notice path. When the cache is missing or stale it
+// claims a refresh (placeholder debounce) and spawns a detached subprocess to
+// fetch + persist the latest version, then returns immediately. The current
+// command never waits on the network.
 func StartAsync() {
-	if shouldSkip() {
+	if isInternalRefresh() || shouldSkip() {
 		return
 	}
-	if r := loadCachedResult(); r != nil {
+	running := strings.TrimSpace(build.Version)
+	if running == "" {
+		return
+	}
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return
+	}
+	if r := loadCachedResult(home, running); r != nil {
 		checkResult.Store(r)
 		return
 	}
-	go func() {
-		r := runCheck()
-		if r != nil {
-			checkResult.Store(r)
-		}
-	}()
+	if !claimRefresh(home, running) {
+		return
+	}
+	spawnRefresh()
 }
 
-func loadCachedResult() *Result {
+// RunRefresh is the detached subprocess entry: fetch the latest version and
+// persist the cache. Failures leave the placeholder in place so the next
+// attempt only happens after the TTL elapses (no per-command hammering).
+func RunRefresh() {
+	if shouldSkip() {
+		return
+	}
+	running := strings.TrimSpace(build.Version)
+	if running == "" {
+		return
+	}
+	latest, err := fetchLatestVersion(refreshFetchTimeout)
+	if err != nil {
+		return
+	}
+	latest = strings.TrimSpace(latest)
+	if latest == "" {
+		return
+	}
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return
+	}
+	_ = SaveCache(home, &Cache{
+		Current:   running,
+		Latest:    latest,
+		CheckedAt: time.Now(),
+		HasUpdate: compareVersions(running, latest) < 0,
+	})
+}
+
+// CheckNow performs a synchronous check for explicit commands
+// (`version --check`, `update`). It returns a fresh cached result when
+// available, otherwise fetches from the registry within the timeout and
+// persists the cache. Returns nil only when update checks are disabled.
+func CheckNow(timeout time.Duration) *Result {
+	if shouldSkip() {
+		return nil
+	}
 	running := strings.TrimSpace(build.Version)
 	if running == "" {
 		return nil
 	}
-	home, err := cliconfig.ResolveHomeDir()
-	if err != nil {
-		return nil
+	if home, err := cliconfig.ResolveHomeDir(); err == nil {
+		if r := loadCachedResult(home, running); r != nil {
+			return r
+		}
 	}
+	latest, err := fetchLatestVersion(timeout)
+	if err != nil {
+		return &Result{Current: running, Err: err}
+	}
+	latest = strings.TrimSpace(latest)
+	if latest == "" {
+		return &Result{Current: running, Err: fmt.Errorf("empty latest version")}
+	}
+	hasUpdate := compareVersions(running, latest) < 0
+	if home, herr := cliconfig.ResolveHomeDir(); herr == nil {
+		_ = SaveCache(home, &Cache{
+			Current:   running,
+			Latest:    latest,
+			CheckedAt: time.Now(),
+			HasUpdate: hasUpdate,
+		})
+	}
+	return &Result{HasUpdate: hasUpdate, Current: running, Latest: latest}
+}
+
+// loadCachedResult returns a displayable result only when the cache is fresh
+// and carries a real latest version. A debounce placeholder (empty Latest) is
+// treated as "nothing to show".
+func loadCachedResult(home, running string) *Result {
 	cached, _ := LoadCache(home)
 	if cached == nil || !IsCacheFresh(cached, running) {
+		return nil
+	}
+	if strings.TrimSpace(cached.Latest) == "" {
 		return nil
 	}
 	return &Result{
@@ -64,6 +152,20 @@ func loadCachedResult() *Result {
 		Current:   cached.Current,
 		Latest:    cached.Latest,
 	}
+}
+
+// claimRefresh debounces detached refreshes. It returns false when a cache
+// entry for the running version is still within the TTL (a real result or a
+// recent placeholder), meaning a refresh is unnecessary. Otherwise it writes a
+// placeholder (CheckedAt=now, empty Latest) and returns true so the caller
+// spawns exactly one refresh subprocess.
+func claimRefresh(home, running string) bool {
+	if cached, _ := LoadCache(home); cached != nil &&
+		cached.Current == running && time.Since(cached.CheckedAt) <= CacheTTL {
+		return false
+	}
+	_ = SaveCache(home, &Cache{Current: running, CheckedAt: time.Now()})
+	return true
 }
 
 func GetResult() *Result {
@@ -78,15 +180,8 @@ func GetResult() *Result {
 	return r
 }
 
-func WaitForResult(timeout time.Duration) *Result {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if r := GetResult(); r != nil {
-			return r
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return GetResult()
+func isInternalRefresh() bool {
+	return strings.TrimSpace(os.Getenv(envInternalRefresh)) == "1"
 }
 
 func shouldSkip() bool {
@@ -102,52 +197,8 @@ func shouldSkip() bool {
 	return false
 }
 
-func runCheck() *Result {
-	running := strings.TrimSpace(build.Version)
-	if running == "" {
-		return nil
-	}
-
-	home, err := cliconfig.ResolveHomeDir()
-	if err == nil {
-		if cached, _ := LoadCache(home); cached != nil && IsCacheFresh(cached, running) {
-			return &Result{
-				HasUpdate: cached.HasUpdate,
-				Current:   cached.Current,
-				Latest:    cached.Latest,
-			}
-		}
-	}
-
-	latest, err := fetchLatestVersion()
-	if err != nil {
-		return &Result{Current: running, Err: err}
-	}
-	latest = strings.TrimSpace(latest)
-	if latest == "" {
-		return &Result{Current: running, Err: fmt.Errorf("empty latest version")}
-	}
-
-	hasUpdate := compareVersions(running, latest) < 0
-	cache := &Cache{
-		Current:   running,
-		Latest:    latest,
-		CheckedAt: time.Now(),
-		HasUpdate: hasUpdate,
-	}
-	if home, herr := cliconfig.ResolveHomeDir(); herr == nil {
-		_ = SaveCache(home, cache)
-	}
-
-	return &Result{
-		HasUpdate: hasUpdate,
-		Current:   running,
-		Latest:    latest,
-	}
-}
-
-func fetchLatestVersion() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+func fetchLatestVersion(timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, NpmRegistryURL, nil)
 	if err != nil {

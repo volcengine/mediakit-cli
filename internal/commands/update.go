@@ -22,8 +22,7 @@ func newUpdateCmd() *cobra.Command {
 		Args:              cobra.NoArgs,
 		DisableAutoGenTag: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			updatecheck.StartAsync()
-			r := updatecheck.WaitForResult(3 * time.Second)
+			r := updatecheck.CheckNow(3 * time.Second)
 			if r == nil {
 				return writeUpdatePayload(cmd, map[string]any{
 					"current": buildinfo.Version,
@@ -78,4 +77,23 @@ func runNpmInstallLatest(cmd *cobra.Command) error {
 	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+// newUpdateRefreshCmd is the hidden entry the detached refresh subprocess runs.
+// It fetches the latest version and writes the cache, with no output. The empty
+// persistent hooks override the root's update-notice hooks so the child never
+// re-spawns itself or prints a nag.
+func newUpdateRefreshCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "__update-refresh",
+		Hidden:             true,
+		Args:               cobra.NoArgs,
+		DisableAutoGenTag:  true,
+		PersistentPreRun:   func(cmd *cobra.Command, args []string) {},
+		PersistentPostRun:  func(cmd *cobra.Command, args []string) {},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			updatecheck.RunRefresh()
+			return nil
+		},
+	}
 }

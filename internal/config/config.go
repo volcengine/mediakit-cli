@@ -182,7 +182,7 @@ func SaveConfig(home string, cfg Config) error {
 	if err := EnsureConfigDir(home); err != nil {
 		return err
 	}
-	return writeJSONAtomic(ConfigFile(home), cfg)
+	return WriteJSONAtomic(ConfigFile(home), cfg)
 }
 
 func ResolveConfig(home string) (ResolvedConfig, error) {
@@ -258,7 +258,7 @@ func SaveEnvCache(home string, cache EnvCache) error {
 	if err := EnsureConfigDir(home); err != nil {
 		return err
 	}
-	return writeJSONAtomic(EnvCacheFile(home), cache)
+	return WriteJSONAtomic(EnvCacheFile(home), cache)
 }
 
 func NewEnvCache(mode string) EnvCache {
@@ -293,7 +293,10 @@ func expandUserPath(value string, home string) (string, error) {
 	return filepath.Abs(filepath.Clean(value))
 }
 
-func writeJSONAtomic(path string, value any) error {
+// WriteJSONAtomic writes value as indented JSON to path atomically: it writes
+// to a temp file in the same directory and renames it into place, so concurrent
+// readers never observe a partially written file.
+func WriteJSONAtomic(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

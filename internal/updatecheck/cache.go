@@ -43,15 +43,7 @@ func LoadCache(home string) (*Cache, error) {
 }
 
 func SaveCache(home string, c *Cache) error {
-	dir := cliconfig.ConfigDir(home)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(CacheFile(home), data, 0o644)
+	return cliconfig.WriteJSONAtomic(CacheFile(home), c)
 }
 
 func IsCacheFresh(c *Cache, runningVersion string) bool {
