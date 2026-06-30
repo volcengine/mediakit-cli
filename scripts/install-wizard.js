@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-const { spawnSync } = require("node:child_process");
-const path = require("node:path");
+const { spawnSync } = require('node:child_process')
+const path = require('node:path')
 
-const pkg = require("../package.json");
+const pkg = require('../package.json')
 
-const PACKAGE_NAME = pkg.name || "@volcengine/mediakit-cli";
-const SKILL_REPO = "volcengine/mediakit-cli";
+const PACKAGE_NAME = pkg.name || '@volcengine/mediakit-cli'
+const SKILL_REPO = 'volcengine/mediakit-cli'
 
 function parseArgs(argv) {
   const opts = {
@@ -14,140 +14,180 @@ function parseArgs(argv) {
     skillsOnly: false,
     skills: [],
     yes: false,
-    versionTag: "latest",
-  };
+    versionTag: pkg.version || 'latest',
+  }
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
+    const a = argv[i]
     switch (a) {
-      case "--cli-only":
-        opts.cliOnly = true;
-        break;
-      case "--skills-only":
-        opts.skillsOnly = true;
-        break;
-      case "-y":
-      case "--yes":
-        opts.yes = true;
-        break;
-      case "-s":
-      case "--skill": {
-        const next = argv[i + 1];
-        if (next && !next.startsWith("-")) {
-          opts.skills.push(next);
-          i++;
+      case '--cli-only':
+        opts.cliOnly = true
+        break
+      case '--skills-only':
+        opts.skillsOnly = true
+        break
+      case '-y':
+      case '--yes':
+        opts.yes = true
+        break
+      case '-s':
+      case '--skill': {
+        const next = argv[i + 1]
+        if (next && !next.startsWith('-')) {
+          opts.skills.push(next)
+          i++
         }
-        break;
+        break
       }
-      case "--version": {
-        const next = argv[i + 1];
-        if (next && !next.startsWith("-")) {
-          opts.versionTag = next;
-          i++;
+      case '--version': {
+        const next = argv[i + 1]
+        if (next && !next.startsWith('-')) {
+          opts.versionTag = next
+          i++
         }
-        break;
+        break
       }
       default:
-        if (a.startsWith("--version=")) {
-          opts.versionTag = a.slice("--version=".length);
-        } else if (a.startsWith("--skills=")) {
+        if (a.startsWith('--version=')) {
+          opts.versionTag = a.slice('--version='.length)
+        } else if (a.startsWith('--skills=')) {
           opts.skills.push(
-            ...a.slice("--skills=".length).split(",").map((s) => s.trim()).filter(Boolean)
-          );
+            ...a
+              .slice('--skills='.length)
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+          )
         }
-        break;
+        break
     }
   }
-  return opts;
+  return opts
 }
 
 function log(msg) {
-  console.log(`[mediakit-cli install] ${msg}`);
+  console.log(`[mediakit-cli install] ${msg}`)
 }
 
 function whichSync(cmd) {
-  const probe = process.platform === "win32" ? "where" : "command";
-  const probeArgs = process.platform === "win32" ? [cmd] : ["-v", cmd];
-  const result = spawnSync(probe, probeArgs, { stdio: "ignore", shell: true });
-  return result.status === 0;
+  const probe = process.platform === 'win32' ? 'where' : 'command'
+  const probeArgs = process.platform === 'win32' ? [cmd] : ['-v', cmd]
+  const result = spawnSync(probe, probeArgs, { stdio: 'ignore', shell: true })
+  return result.status === 0
 }
 
 function runNpmInstall(target) {
-  log(`installing ${target} via npm install -g`);
-  const result = spawnSync("npm", ["install", "-g", target], {
-    stdio: "inherit",
-  });
+  log(`installing ${target} via npm install -g`)
+  const result = spawnSync('npm', ['install', '-g', target], {
+    stdio: 'inherit',
+  })
   if (result.error) {
-    throw result.error;
+    throw result.error
   }
   if (result.status !== 0) {
-    throw new Error(`npm install -g ${target} failed with exit code ${result.status}`);
+    throw new Error(
+      `npm install -g ${target} failed with exit code ${result.status}`,
+    )
   }
 }
 
 function runSkillsAdd(opts) {
-  const args = ["-y", "skills", "add", SKILL_REPO];
+  const args = ['-y', 'skills', 'add', SKILL_REPO]
   if (opts.skills.length === 0) {
-    args.push("-g");
+    args.push('-g')
   } else {
     for (const skill of opts.skills) {
-      args.push("-s", skill);
+      args.push('-s', skill)
     }
   }
   if (opts.yes) {
-    args.push("-y");
+    args.push('-y')
   }
-  log(`installing skills via npx ${args.join(" ")}`);
-  const result = spawnSync("npx", args, { stdio: "inherit" });
+  log(`installing skills via npx ${args.join(' ')}`)
+  const result = spawnSync('npx', args, { stdio: 'inherit' })
   if (result.error) {
-    throw result.error;
+    throw result.error
   }
   if (result.status !== 0) {
-    throw new Error(`npx skills add failed with exit code ${result.status}`);
+    throw new Error(`npx skills add failed with exit code ${result.status}`)
   }
 }
 
-function isCliAlreadyInstalled() {
-  // If MEDIAKIT_CLI_FORCE_REINSTALL=1, always reinstall.
-  if (
-    process.env.MEDIAKIT_CLI_FORCE_REINSTALL === "1" ||
-    process.env.MEDIKIT_CLI_FORCE_REINSTALL === "1"
-  ) {
-    return false;
+function getLocalCliVersion() {
+  if (!whichSync('mediakit-cli')) {
+    return null
   }
-  return whichSync("mediakit-cli");
+  const res = spawnSync('mediakit-cli', ['--version'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+  if (res.error || res.status !== 0) {
+    return null
+  }
+  const match = (res.stdout || '').match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)
+  return match ? match[0] : null
+}
+
+function resolveTargetVersion(tag) {
+  if (!tag || tag === 'latest') {
+    const res = spawnSync('npm', ['view', PACKAGE_NAME, 'dist-tags.latest'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    if (res.error || res.status !== 0) {
+      return null
+    }
+    const out = (res.stdout || '').trim()
+    return out || null
+  }
+  return tag
+}
+
+function shouldSkipCliInstall(targetTag) {
+  const local = getLocalCliVersion()
+  if (!local) {
+    return false
+  }
+  const target = resolveTargetVersion(targetTag)
+  if (!target) {
+    return false
+  }
+  if (local === target) {
+    log(`mediakit-cli ${local} already installed; skipping CLI install`)
+    return true
+  }
+  log(`local mediakit-cli ${local} != target ${target}; installing`)
+  return false
 }
 
 async function runInstallWizard(rawArgs) {
-  const opts = parseArgs(rawArgs);
+  const opts = parseArgs(rawArgs)
 
-  if (!whichSync("npm")) {
-    throw new Error("npm is required but not found in PATH");
+  if (!whichSync('npm')) {
+    throw new Error('npm is required but not found in PATH')
   }
 
   if (!opts.skillsOnly) {
-    if (isCliAlreadyInstalled()) {
-      log("mediakit-cli already installed; skipping CLI install");
-    } else {
-      const target = `${PACKAGE_NAME}@${opts.versionTag}`;
-      runNpmInstall(target);
+    if (!shouldSkipCliInstall(opts.versionTag)) {
+      const target = `${PACKAGE_NAME}@${opts.versionTag}`
+      runNpmInstall(target)
     }
   }
 
   if (!opts.cliOnly) {
-    if (!whichSync("npx")) {
-      throw new Error("npx is required to install skills but not found in PATH");
+    if (!whichSync('npx')) {
+      throw new Error('npx is required to install skills but not found in PATH')
     }
-    runSkillsAdd(opts);
+    runSkillsAdd(opts)
   }
 
-  log("done.");
+  log('done.')
 }
 
-module.exports = { runInstallWizard };
+module.exports = { runInstallWizard }
 
 if (require.main === module) {
   runInstallWizard(process.argv.slice(2)).catch((error) => {
-    console.error(`[mediakit-cli install] ${error.message}`);
-    process.exit(1);
-  });
+    console.error(`[mediakit-cli install] ${error.message}`)
+    process.exit(1)
+  })
 }
