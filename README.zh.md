@@ -14,11 +14,16 @@
 
 ## ✨ 能做什么
 
-| 能力                                                                                              | 运行             | 状态        |
-| ------------------------------------------------------------------------------------------------- | ---------------- | ----------- |
-| **AI 能力** — 画质增强 · 字幕擦除                                                                 | 云端             | ✅ 已上线   |
-| **剪辑能力**（11 个）— 裁剪 · 拼接 · 加水印 · 加字幕 · 调速 · 翻转 · 提取 / 合成音频 · 图片转视频 | 云端 **或** 本地 | ✅ 已上线   |
-| **更多 AI 工作流** — 视频理解 · 视频翻译 · 高光智剪 · 剧本还原 · 解说 · 漫剧转绘 …                | 云端             | 🚧 陆续上线 |
+**5 大领域、40+ 能力** —— 运行 `mediakit-cli --help-full` 可列全。
+
+| 领域 | 能力 | 运行 | 状态 |
+| --- | --- | --- | --- |
+| 🎬 **剪辑** (17) | 裁剪 · 拼接 · 加水印 · 加字幕 · 调速 · 调音量 · 滤镜 · 翻转 · 淡入淡出 · 混音 · 合成 · 提取音频 · 图片转视频 | 云端 **或** 本地 | ✅ 已上线 |
+| 🎚️ **音频** (2) | 人声 / 背景音分离 · 音频元信息探测 | 云端 | ✅ 已上线 |
+| 🖼️ **图像 AI** (5) | 画质增强 · 擦除修复 · 画质评分 · OCR · 背景移除 | 云端 | ✅ 已上线 |
+| 🎥 **视频 AI** (14) | 画质增强（含生成式修复）· 字幕擦除 · ASR 字幕 · OCR · 高光智剪（短剧 / 小游戏）· 剧情线分析 · 场景切分 · 人像 & 绿幕抠图 · 元信息探测 | 云端 | ✅ 已上线 |
+| 🔧 **通用** (2) | 异步任务查询 · 远程文件拉取 | 本地 / 云端 | ✅ 已上线 |
+| 🚧 **即将上线** | 视频翻译 · 解说生成 · 漫剧转绘 | 云端 | 陆续上线 |
 
 > AI 能力跑在云端（弹性算力、异步）；剪辑能力**云端或本地**皆可（本地跑，同步、零成本）—— 每条命令用 `--cloud` / `--local` 选。
 
@@ -44,7 +49,10 @@ mediakit-cli --local editing trim-video --video-url ./in.mp4 --start-time 3 --en
 ## 📦 安装
 
 ```bash
-# npm（推荐，跨平台——自动拉取对应平台 / 架构的构建产物）
+# 一键安装（CLI + AI Agent Skill）
+npx @volcengine/mediakit-cli install -y
+
+# 仅装 CLI（推荐，跨平台——自动拉取对应平台 / 架构的构建产物）
 npm install -g @volcengine/mediakit-cli
 
 # npx（免安装）
@@ -58,11 +66,23 @@ curl -fsSL https://raw.githubusercontent.com/volcengine/mediakit-cli/main/script
 
 验证环境：`mediakit-cli doctor`（检查云端就绪 + 本地工具依赖 + 安装指引）。
 
+### 更新
+
+CLI 每天会向 npm registry 检查一次新版本（TTL 24h）。有更新时，`stderr` 会出现提示，stdout JSON 会带上 `_notice.update` 字段。
+
+```bash
+mediakit-cli version --check       # 以 JSON 输出当前版本 vs 最新版本
+mediakit-cli update --check        # 只检查，不安装
+mediakit-cli update                # 通过 `npm install -g` 安装最新版
+```
+
+如需关闭自动检查，设置 `MEDIAKIT_DISABLE_UPDATE_CHECK=1`，或在 CI 中运行（`CI` 环境变量被设置时也会自动抑制）。
+
 ---
 
 ## 🤖 配合 AI Agent 使用
 
-`mediakit-cli` 自带 **AI Agent Skill**——教 Agent 怎么调它。于是用户只需说一句*“把这个视频增强到 1080p，再剪出最精彩的 5 秒”*，Agent 就能自动编排命令。
+`mediakit-cli` 自带 **AI Agent Skill**——教 Agent 怎么调它。于是用户只需说一句*"把这个视频增强到 1080p，再剪出最精彩的 5 秒"*，Agent 就能自动编排命令。
 
 ```bash
 # 一个命令把 Skill 装进本机所有支持的 Agent
@@ -78,7 +98,7 @@ npx skills add volcengine/mediakit-cli -g -y
 ## 🧩 工作原理
 
 - **两种模式，同一套命令。** `--cloud` 把重算力 AI 跑在火山引擎云端（弹性算力、异步 `task_id`）；`--local` 在本机跑确定性剪辑（同步、零云端成本）。默认 `cloud-first`，单命令 flag 可覆盖。
-- **命令结构：** `mediakit-cli [--cloud|--local] <domain> <tool> [flags]`——domain 为 `editing` · `video` · `shared`。
+- **命令结构：** `mediakit-cli [--cloud|--local] <domain> <tool> [flags]`——domain 为 `editing` · `audio` · `image` · `video` · `shared`。
 - **输出：** 云端结果以 URL 返回；本地结果写到 `~/.mediakit/temp`（可用 `--output-path` 或 `MEDIAKIT_OUTPUT_PATH` 覆盖）。
 
 ---
@@ -87,6 +107,7 @@ npx skills add volcengine/mediakit-cli -g -y
 
 - Volcengine AI MediaKit 产品文档 & 定价：https://www.volcengine.com/docs/6448
 - 完整命令参考 & FAQ：见文档站。
+- [错误码与退出码契约](./docs/error-codes.md) —— stdout JSON 协议与退出码规则。
 
 ---
 
