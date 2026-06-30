@@ -112,53 +112,6 @@ function runSkillsAdd(opts) {
   }
 }
 
-function getLocalCliVersion() {
-  if (!whichSync('mediakit-cli')) {
-    return null
-  }
-  const res = spawnSync('mediakit-cli', ['--version'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  })
-  if (res.error || res.status !== 0) {
-    return null
-  }
-  const match = (res.stdout || '').match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)
-  return match ? match[0] : null
-}
-
-function resolveTargetVersion(tag) {
-  if (!tag || tag === 'latest') {
-    const res = spawnSync('npm', ['view', PACKAGE_NAME, 'dist-tags.latest'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    if (res.error || res.status !== 0) {
-      return null
-    }
-    const out = (res.stdout || '').trim()
-    return out || null
-  }
-  return tag
-}
-
-function shouldSkipCliInstall(targetTag) {
-  const local = getLocalCliVersion()
-  if (!local) {
-    return false
-  }
-  const target = resolveTargetVersion(targetTag)
-  if (!target) {
-    return false
-  }
-  if (local === target) {
-    log(`mediakit-cli ${local} already installed; skipping CLI install`)
-    return true
-  }
-  log(`local mediakit-cli ${local} != target ${target}; installing`)
-  return false
-}
-
 async function runInstallWizard(rawArgs) {
   const opts = parseArgs(rawArgs)
 
@@ -167,10 +120,7 @@ async function runInstallWizard(rawArgs) {
   }
 
   if (!opts.skillsOnly) {
-    if (!shouldSkipCliInstall(opts.versionTag)) {
-      const target = `${PACKAGE_NAME}@${opts.versionTag}`
-      runNpmInstall(target)
-    }
+    runNpmInstall(`${PACKAGE_NAME}@${opts.versionTag}`)
   }
 
   if (!opts.cliOnly) {
