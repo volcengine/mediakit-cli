@@ -11,8 +11,27 @@ const http = require("node:http");
 const pkg = require("../package.json");
 
 const PROJECT_NAME = "mediakit-cli";
+
+// Deprecated env names (MEDIKIT_*) are still read for back-compat but emit a
+// warning. New env names use the MEDIAKIT_* prefix (Rule 22). The 0.3.0
+// release will drop the deprecated forms.
+function readEnv(currentName, deprecatedName) {
+  const current = process.env[currentName];
+  if (current !== undefined && current !== "") {
+    return current;
+  }
+  const deprecated = process.env[deprecatedName];
+  if (deprecated !== undefined && deprecated !== "") {
+    console.warn(
+      `[mediakit-cli] env ${deprecatedName} is deprecated, please use ${currentName}`
+    );
+    return deprecated;
+  }
+  return undefined;
+}
+
 const RELEASE_BASE_URL =
-  process.env.MEDIKIT_CLI_RELEASE_BASE_URL ||
+  readEnv("MEDIAKIT_CLI_RELEASE_BASE_URL", "MEDIKIT_CLI_RELEASE_BASE_URL") ||
   "https://github.com/volcengine/mediakit-cli/releases/download";
 const TMP_PREFIX = "mediakit-cli-install-";
 const packageRoot = path.resolve(__dirname, "..");
@@ -180,14 +199,15 @@ function findBinary(rootDir, targetName) {
 }
 
 async function install(options = {}) {
-  if (process.env.MEDIKIT_CLI_SKIP_DOWNLOAD === "1") {
-    console.log("[mediakit-cli] skip download because MEDIKIT_CLI_SKIP_DOWNLOAD=1");
+  if (readEnv("MEDIAKIT_CLI_SKIP_DOWNLOAD", "MEDIKIT_CLI_SKIP_DOWNLOAD") === "1") {
+    console.log("[mediakit-cli] skip download because MEDIAKIT_CLI_SKIP_DOWNLOAD=1");
     return;
   }
 
   const platform = resolvePlatform();
   const arch = resolveArch();
-  const version = process.env.MEDIKIT_CLI_VERSION || pkg.version;
+  const version =
+    readEnv("MEDIAKIT_CLI_VERSION", "MEDIKIT_CLI_VERSION") || pkg.version;
   const targetBinary = path.join(binDir, binaryName());
 
   if (!options.force && fs.existsSync(targetBinary)) {

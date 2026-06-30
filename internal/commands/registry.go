@@ -12,9 +12,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"mediakit-cli/internal/cliexit"
 	cliconfig "mediakit-cli/internal/config"
 	"mediakit-cli/internal/local"
 	"mediakit-cli/internal/modes"
+	"mediakit-cli/internal/updatecheck"
 )
 
 type DomainMeta struct {
@@ -2647,7 +2649,7 @@ func newCapabilityCommand(meta CapabilityMeta) *cobra.Command {
 		Use:               capabilityMeta.Name,
 		Short:             capabilityMeta.Description,
 		Long:              renderCapabilityHelp(capabilityMeta),
-		Args:              cobra.NoArgs,
+		Args:              capabilityArgsValidator(capabilityMeta),
 		DisableAutoGenTag: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --schema: 输出工具 schema 后退出
@@ -2660,6 +2662,11 @@ func newCapabilityCommand(meta CapabilityMeta) *cobra.Command {
 				return err
 			}
 			if err := modes.Dispatch(cmd, capabilityMeta.runtimeMeta(), params); err != nil {
+				// 业务失败 sentinel：JSON 已由底层 writer 写入 stdout，
+				// 这里直接向上传递，避免再次写一份 capability error JSON。
+				if errors.Is(err, cliexit.ErrBusinessFailure) {
+					return err
+				}
 				return writeCapabilityError(cmd.OutOrStdout(), err)
 			}
 			return nil
@@ -2671,6 +2678,53 @@ func newCapabilityCommand(meta CapabilityMeta) *cobra.Command {
 	configureCapabilityHelp(cmd, capabilityMeta)
 
 	return cmd
+}
+
+// capabilityArgsValidator 为 capability 命令构建自定义 Args 校验器。
+// 在拒绝位置参数（等价 cobra.NoArgs）的同时，识别 bool flag 误用模式
+// (`--flag value` 而非 `--flag=value` 或裸 `--flag`)，给出可操作提示。
+func capabilityArgsValidator(meta CapabilityMeta) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return nil
+		}
+		boolFlags := collectBoolFlagNames(meta)
+		if len(boolFlags) > 0 {
+			for _, arg := range args {
+				if isBoolLiteral(arg) {
+					return fmt.Errorf(
+						"boolean flag 必须写成 --flag=true / --flag=false 或裸 --flag，不能用空格分隔；当前命令的 boolean 参数: %s",
+						strings.Join(boolFlags, ", "),
+					)
+				}
+			}
+		}
+		return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+	}
+}
+
+// isBoolLiteral 判断字符串是否是 bool 字面量。
+func isBoolLiteral(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "false", "1", "0":
+		return true
+	}
+	return false
+}
+
+// collectBoolFlagNames 返回 capability 所有 boolean 类型参数的 flag 名称。
+func collectBoolFlagNames(meta CapabilityMeta) []string {
+	var names []string
+	for _, p := range meta.Params {
+		if p.Type == "boolean" {
+			flag := p.FlagName
+			if flag == "" {
+				flag = strings.ReplaceAll(p.Name, "_", "-")
+			}
+			names = append(names, "--"+flag)
+		}
+	}
+	return names
 }
 
 func renderDomainHelp(domain DomainMeta, capabilities []CapabilityMeta) string {
@@ -3083,22 +3137,32 @@ func writeCapabilityError(writer io.Writer, err error) error {
 	// 如果是 DependencyError，使用其自带的结构化输出（含 install_guide）
 	var depErr *local.DependencyError
 	if errors.As(err, &depErr) {
+		payload := depErr.StructuredError()
+		updatecheck.InjectNotice(payload)
 		encoder := json.NewEncoder(writer)
 		encoder.SetEscapeHTML(false)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(depErr.StructuredError())
+		if encErr := encoder.Encode(payload); encErr != nil {
+			return encErr
+		}
+		return cliexit.ErrBusinessFailure
 	}
 
-	encoder := json.NewEncoder(writer)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(map[string]any{
+	payload := map[string]any{
 		"error": map[string]any{
 			"type":    classifyErrorType(err),
 			"code":    classifyErrorCode(err),
 			"message": err.Error(),
 		},
-	})
+	}
+	updatecheck.InjectNotice(payload)
+	encoder := json.NewEncoder(writer)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if encErr := encoder.Encode(payload); encErr != nil {
+		return encErr
+	}
+	return cliexit.ErrBusinessFailure
 }
 
 func classifyErrorType(err error) string {
@@ -3164,6 +3228,9 @@ func classifyErrorCode(err error) string {
 }
 
 func writeJSON(out io.Writer, value any) error {
+	if m, ok := value.(map[string]any); ok {
+		updatecheck.InjectNotice(m)
+	}
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
@@ -3221,11 +3288,14 @@ func buildCapabilitySchema(meta CapabilityMeta, resolvedMode string) map[string]
 
 	// 构建描述
 	description := meta.Description
-	if meta.Async {
-		description += "\n\n- Async: 是,用 mediakit_shared_query_task 查询结果"
-	}
 	modeLabel := modes.ModeLabel(meta.runtimeMeta())
-	description += "\n- Mode: " + modeLabel
+	description += "\n\n- Mode: " + modeLabel
+	if meta.Async {
+		description += "\n- Async: 是"
+		description += "\n- 轮询命令: mediakit-cli shared query-task --task-id <id> --poll-complete"
+	} else {
+		description += "\n- Async: 否"
+	}
 
 	// 构建工具名（domain_tool 格式）
 	toolName := strings.ReplaceAll(meta.Name, "-", "_")

@@ -14,11 +14,16 @@
 
 ## ✨ What it can do
 
-| Capability                                                                                                                          | Runs on            | Status         |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------ | -------------- |
-| **AI** — video enhancement · subtitle removal                                                                                       | cloud              | ✅ Available   |
-| **Editing** (11) — trim · concat · watermark · subtitle · speed · flip · extract / mux audio · image-to-video                       | cloud **or** local | ✅ Available   |
-| **More AI workflows** — video understanding · translation · highlight clipping · script extraction · commentary · anime restyling … | cloud              | 🚧 Rolling out |
+**40+ capabilities across 5 domains** — run `mediakit-cli --help-full` to list them all.
+
+| Domain               | Capabilities                                                                                                                                                                                                     | Runs on            | Status       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------ |
+| 🎬 **Editing** (17)  | trim · concat · watermark · subtitle · speed · volume · filter · flip · fade · mix · mux · extract audio · image-to-video                                                                                        | cloud **or** local | ✅ Available |
+| 🎚️ **Audio** (2)     | voice / background separation · audio metadata probe                                                                                                                                                             | cloud              | ✅ Available |
+| 🖼️ **Image AI** (5)  | enhance · object / text erase · quality scoring · OCR · background removal                                                                                                                                       | cloud              | ✅ Available |
+| 🎥 **Video AI** (14) | enhancement (+ generative restore) · subtitle removal · ASR subtitles · OCR · highlight clipping (short-drama / mini-game) · storyline analysis · scene split · portrait & green-screen matting · metadata probe | cloud              | ✅ Available |
+| 🔧 **Shared** (2)    | async task query · remote-file fetch                                                                                                                                                                             | local / cloud      | ✅ Available |
+| 🚧 **Coming**        | video translation · commentary generation · anime restyling                                                                                                                                                      | cloud              | Rolling out  |
 
 > AI capabilities run in the cloud (elastic compute, async). Editing runs **either** in the cloud **or** locally (sync, zero cost) — pick per command with `--cloud` / `--local`.
 
@@ -44,7 +49,10 @@ mediakit-cli --local editing trim-video --video-url ./in.mp4 --start-time 3 --en
 ## 📦 Install
 
 ```bash
-# npm (recommended, cross-platform — pulls the right build for your OS / arch)
+# One-click install (CLI + AI agent Skills)
+npx @volcengine/mediakit-cli install -y
+
+# npm only (CLI, recommended, cross-platform — pulls the right build for your OS / arch)
 npm install -g @volcengine/mediakit-cli
 
 # npx (no install)
@@ -57,6 +65,18 @@ curl -fsSL https://raw.githubusercontent.com/volcengine/mediakit-cli/main/script
 Pin a version or path: `VERSION=<version> INSTALL_DIR="$HOME/.local/bin" curl -fsSL …/install.sh | bash`
 
 Verify: `mediakit-cli doctor` (checks cloud readiness + local tool deps + install hints).
+
+### Update
+
+The CLI checks the npm registry for new releases once a day (TTL 24h). When an update is available you'll see a hint in `stderr` and a `_notice.update` field in the stdout JSON.
+
+```bash
+mediakit-cli version --check       # report current vs latest as JSON
+mediakit-cli update --check        # check only, no install
+mediakit-cli update                # install the latest via `npm install -g`
+```
+
+Suppress the check with `MEDIAKIT_DISABLE_UPDATE_CHECK=1` or in CI (`CI` env set).
 
 ---
 
@@ -78,7 +98,7 @@ Every capability is also **MCP-compatible** — `mediakit-cli <domain> <tool> --
 ## 🧩 How it works
 
 - **Two modes, one command surface.** `--cloud` runs heavy AI in Volcengine's cloud (elastic compute, async `task_id`); `--local` runs deterministic editing locally (sync, zero cloud cost). Default mode is `cloud-first`; per-command flags override it.
-- **Command structure:** `mediakit-cli [--cloud|--local] <domain> <tool> [flags]` — domains are `editing` · `video` · `shared`.
+- **Command structure:** `mediakit-cli [--cloud|--local] <domain> <tool> [flags]` — domains are `editing` · `audio` · `image` · `video` · `shared`.
 - **Outputs:** cloud results are returned as URLs; local results write to `~/.mediakit/temp` (override with `--output-path` or `MEDIAKIT_OUTPUT_PATH`).
 
 ---
@@ -87,6 +107,7 @@ Every capability is also **MCP-compatible** — `mediakit-cli <domain> <tool> --
 
 - Volcengine AI MediaKit product docs & pricing: https://www.volcengine.com/docs/6448
 - Full command reference & FAQ: see the docs site.
+- [Error codes & exit code contract](./docs/error-codes.md) — stdout JSON protocol and exit-code rules.
 
 ---
 

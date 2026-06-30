@@ -2,8 +2,28 @@
 set -euo pipefail
 
 PROJECT_NAME="mediakit-cli"
-RELEASE_BASE_URL="${MEDIKIT_CLI_RELEASE_BASE_URL:-https://github.com/volcengine/mediakit-cli/releases/download}"
-LATEST_API_URL="${MEDIKIT_CLI_LATEST_API_URL:-https://api.github.com/repos/volcengine/mediakit-cli/releases/latest}"
+
+# Resolve env vars from MEDIAKIT_* (preferred) or MEDIKIT_* (deprecated).
+resolve_env() {
+  local current="$1"
+  local legacy="$2"
+  local fallback="${3:-}"
+  local cur_val="${!current:-}"
+  local legacy_val="${!legacy:-}"
+  if [[ -n "${cur_val}" ]]; then
+    printf '%s' "${cur_val}"
+    return
+  fi
+  if [[ -n "${legacy_val}" ]]; then
+    echo "[mediakit-cli] env ${legacy} is deprecated, please use ${current}" >&2
+    printf '%s' "${legacy_val}"
+    return
+  fi
+  printf '%s' "${fallback}"
+}
+
+RELEASE_BASE_URL="$(resolve_env MEDIAKIT_CLI_RELEASE_BASE_URL MEDIKIT_CLI_RELEASE_BASE_URL "https://github.com/volcengine/mediakit-cli/releases/download")"
+LATEST_API_URL="$(resolve_env MEDIAKIT_CLI_LATEST_API_URL MEDIKIT_CLI_LATEST_API_URL "https://api.github.com/repos/volcengine/mediakit-cli/releases/latest")"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 VERSION="${VERSION:-}"
 

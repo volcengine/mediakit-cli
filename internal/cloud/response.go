@@ -68,7 +68,9 @@ func newAPIError(statusCode int, payloadBytes []byte) error {
 }
 
 func errorResponse(err error, taskID string, requestID string) map[string]any {
-	output := map[string]any{}
+	output := map[string]any{
+		"success": false,
+	}
 
 	if apiErr, ok := err.(*APIError); ok {
 		if apiErr.Payload != nil {
@@ -115,7 +117,9 @@ func isBusinessFailure(payload map[string]any) bool {
 
 // businessFailureResponse 把业务级失败的响应体直接透传输出。
 func businessFailureResponse(payload map[string]any) map[string]any {
-	output := map[string]any{}
+	output := map[string]any{
+		"success": false,
+	}
 	if errField, ok := payload["error"]; ok && errField != nil {
 		output["error"] = errField
 	} else {
