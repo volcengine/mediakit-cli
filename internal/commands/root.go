@@ -2,6 +2,7 @@ package commands
 
 import (
 	buildinfo "mediakit-cli/internal/build"
+	"mediakit-cli/internal/updatecheck"
 
 	"github.com/spf13/cobra"
 )
@@ -23,6 +24,14 @@ func newRootCmd() *cobra.Command {
 		Short:             "MediaKit command line interface",
 		Long: `MediaKit CLI provides system commands, domain navigation, and generated capability commands.
 
+One-click install (CLI + AI agent Skills):
+  npx @volcengine/mediakit-cli install -y
+
+Update:
+  mediakit-cli update          # install latest via npm install -g
+  mediakit-cli update --check  # only report status
+  mediakit-cli version --check # show current vs latest
+
 AI Agent Skills:
   mediakit-cli pairs with AI agent skills (Claude Code, etc.) that
   teach the agent MediaKit CLI patterns, best practices, and workflows.
@@ -32,11 +41,20 @@ AI Agent Skills:
 
   Or pick specific domains:
     npx skills add volcengine/mediakit-cli -s byted-mediakit-editing -y
+    npx skills add volcengine/mediakit-cli -s byted-mediakit-audio -y
+    npx skills add volcengine/mediakit-cli -s byted-mediakit-image -y
     npx skills add volcengine/mediakit-cli -s byted-mediakit-video -y
     npx skills add volcengine/mediakit-cli -s byted-mediakit-shared -y`,
 		SilenceUsage:      true,
+		SilenceErrors:     true,
 		DisableAutoGenTag: true,
 		Version:           buildinfo.Version,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			updatecheck.StartAsync()
+		},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			updatecheck.PrintStderrNag(cmd.ErrOrStderr())
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
 			case showDomains:
@@ -58,6 +76,8 @@ AI Agent Skills:
 	cmd.AddCommand(newDoctorCmd())
 	cmd.AddCommand(newConfigCmd())
 	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newUpdateCmd())
+	cmd.AddCommand(newUpdateRefreshCmd())
 
 	for _, domainCmd := range newGeneratedDomainCommands() {
 		cmd.AddCommand(domainCmd)

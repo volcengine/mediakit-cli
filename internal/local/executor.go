@@ -12,9 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mediakit-cli/internal/cliexit"
 	cliconfig "mediakit-cli/internal/config"
 	"mediakit-cli/internal/local/core"
 	"mediakit-cli/internal/output"
+	"mediakit-cli/internal/updatecheck"
 )
 
 // Executor coordinates local capability execution in later stages.
@@ -112,10 +114,39 @@ func Execute(cmd *cobra.Command, command string, params map[string]any) error {
 }
 
 func writeJSON(output io.Writer, value any) error {
+	if m, ok := value.(map[string]any); ok {
+		updatecheck.InjectNotice(m)
+	}
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(value)
+	if err := encoder.Encode(value); err != nil {
+		return err
+	}
+	if m, ok := value.(map[string]any); ok {
+		if errField, exists := m["error"]; exists && !isEmptyErrorValue(errField) {
+			return cliexit.ErrBusinessFailure
+		}
+	}
+	return nil
+}
+
+// isEmptyErrorValue 判断 error 字段是否实质为空：
+// nil / 空字符串 / 空 map / 空 slice 都视为"无错误"，不应触发 sentinel。
+func isEmptyErrorValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch typed := v.(type) {
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case map[string]any:
+		return len(typed) == 0
+	case []any:
+		return len(typed) == 0
+	default:
+		return false
+	}
 }
 
 func cloneParams(params map[string]any) map[string]any {
