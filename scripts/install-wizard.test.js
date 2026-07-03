@@ -47,9 +47,12 @@ process.exit(0)
 
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }))
   const oldPath = process.env.PATH
+  const oldHome = process.env.HOME
   process.env.PATH = `${bin}${path.delimiter}${oldPath || ''}`
+  process.env.HOME = temp
   t.after(() => {
     process.env.PATH = oldPath
+    process.env.HOME = oldHome
   })
 
   await runInstallWizard(['--skills-only', '--skill', 'byted-mediakit-video', '-y'])
@@ -72,6 +75,12 @@ process.exit(0)
     '-y',
   ])
   assert(!calls[0].args.some((arg) => /^https?:\/\//.test(String(arg))))
+  const state = JSON.parse(
+    fs.readFileSync(path.join(temp, '.mediakit', 'skills-state.json'), 'utf8'),
+  )
+  assert.equal(state.package_name, '@volcengine/mediakit-cli')
+  assert.equal(state.version, '0.1.7')
+  assert.equal(state.skills_dir, path.join(__dirname, '..', 'skills'))
 })
 
 test('regular install delegates skills installation to npm postinstall', async (t) => {

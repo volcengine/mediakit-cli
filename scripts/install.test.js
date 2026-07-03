@@ -39,11 +39,14 @@ process.exit(0)
 
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }))
   const oldPath = process.env.PATH
+  const oldHome = process.env.HOME
   const oldSkip = process.env.MEDIAKIT_CLI_SKIP_DOWNLOAD
   process.env.PATH = `${bin}${path.delimiter}${oldPath || ''}`
+  process.env.HOME = temp
   delete process.env.MEDIAKIT_CLI_SKIP_DOWNLOAD
   t.after(() => {
     process.env.PATH = oldPath
+    process.env.HOME = oldHome
     if (oldSkip === undefined) {
       delete process.env.MEDIAKIT_CLI_SKIP_DOWNLOAD
     } else {
@@ -69,4 +72,10 @@ process.exit(0)
   ])
   assert.match(output, /Installing skills \.\.\./)
   assert.match(output, /✓ Skills installed/)
+  const state = JSON.parse(
+    fs.readFileSync(path.join(temp, '.mediakit', 'skills-state.json'), 'utf8'),
+  )
+  assert.equal(state.package_name, '@volcengine/mediakit-cli')
+  assert.equal(state.version, '0.1.7')
+  assert.equal(state.skills_dir, path.join(__dirname, '..', 'skills'))
 })

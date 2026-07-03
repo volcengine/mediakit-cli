@@ -9,6 +9,8 @@ import (
 	"time"
 
 	buildinfo "mediakit-cli/internal/build"
+	cliconfig "mediakit-cli/internal/config"
+	"mediakit-cli/internal/skillstate"
 	"mediakit-cli/internal/updatecheck"
 
 	"github.com/spf13/cobra"
@@ -54,6 +56,7 @@ func newUpdateCmd() *cobra.Command {
 			payload["upgrade_command"] = "mediakit-cli update"
 			if checkOnly {
 				payload["action"] = "check"
+				applySkillsStatus(payload, r.Current)
 				if !asJSON {
 					return writeUpdateCheckText(cmd, r)
 				}
@@ -78,11 +81,8 @@ func newUpdateCmd() *cobra.Command {
 				payload["action"] = "noop"
 			}
 
-			shouldInstallSkills := !r.HasUpdate && force
+			shouldInstallSkills := !r.HasUpdate && shouldInstallSkillsForVersion(r.Current, force)
 			if shouldInstallSkills {
-				if !asJSON {
-					fmt.Fprintln(cmd.OutOrStdout(), "\nInstalling skills from the current npm package ...")
-				}
 				if err := runSkillsInstall(cmd); err != nil {
 					payload["skills_action"] = "failed"
 					payload["skills_error"] = err.Error()
@@ -132,7 +132,8 @@ func writeUpdateText(cmd *cobra.Command, r *updatecheck.Result, skillsInstalled 
 		fmt.Fprintf(cmd.OutOrStdout(), "mediakit-cli %s is already up to date\n", r.Current)
 	}
 	if skillsInstalled {
-		_, err := fmt.Fprintln(cmd.OutOrStdout(), "✓ Skills installed from the current npm package")
+		fmt.Fprintln(cmd.OutOrStdout(), "\nUpdating skills ...")
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "✓ Skills updated")
 		return err
 	}
 	return nil
@@ -147,10 +148,47 @@ func runNpmInstallLatest(cmd *cobra.Command) error {
 }
 
 func runSkillsInstallFromPackage(cmd *cobra.Command) error {
-	c := exec.Command("npx", "-y", updatecheck.PackageName, "install", "--skills-only", "-y")
+	c := exec.Command("npx", "-y", currentPackageSpec(), "install", "--skills-only", "-y")
 	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+func currentPackageSpec() string {
+	version := normalizeVersion(buildinfo.Version)
+	if version == "" {
+		return updatecheck.PackageName
+	}
+	return fmt.Sprintf("%s@%s", updatecheck.PackageName, version)
+}
+
+func shouldInstallSkillsForVersion(version string, force bool) bool {
+	if force {
+		return true
+	}
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return false
+	}
+	return !skillstate.InSync(home, version)
+}
+
+func applySkillsStatus(payload map[string]any, target string) {
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return
+	}
+	status, err := skillstate.ReadStatus(home, target)
+	if err != nil || status == nil {
+		return
+	}
+	payload["skills_status"] = map[string]any{
+		"current": status.Current,
+		"target":  status.Target,
+		"in_sync": status.InSync,
+		"missing": status.Missing,
+		"command": status.Command,
+	}
 }
 
 func normalizeVersion(version string) string {

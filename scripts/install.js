@@ -213,7 +213,26 @@ function installSkills() {
   if (result.status !== 0) {
     throw new Error(`npx skills add failed with exit code ${result.status}`);
   }
+  writeSkillsState();
   console.log("[mediakit-cli] ✓ Skills installed");
+}
+
+function writeSkillsState() {
+  const stateFile = path.join(os.homedir(), ".mediakit", "skills-state.json");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(
+    stateFile,
+    `${JSON.stringify(
+      {
+        package_name: pkg.name || "@volcengine/mediakit-cli",
+        version: pkg.version,
+        skills_dir: skillsDir,
+        installed_at: new Date().toISOString(),
+      },
+      null,
+      2
+    )}\n`
+  );
 }
 
 async function install(options = {}) {

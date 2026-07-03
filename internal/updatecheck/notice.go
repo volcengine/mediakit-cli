@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"mediakit-cli/internal/build"
+	cliconfig "mediakit-cli/internal/config"
+	"mediakit-cli/internal/skillstate"
 )
 
 // NoticePayload returns a map suitable to be embedded into the JSON stdout
@@ -27,16 +31,45 @@ func InjectNotice(result map[string]any) {
 	if result == nil {
 		return
 	}
-	payload := NoticePayload()
-	if payload == nil {
-		return
-	}
 	notice, _ := result["_notice"].(map[string]any)
 	if notice == nil {
 		notice = map[string]any{}
 	}
-	notice["update"] = payload
+	if payload := NoticePayload(); payload != nil {
+		notice["update"] = payload
+	}
+	if payload := SkillsNoticePayload(); payload != nil {
+		notice["skills"] = payload
+	}
+	if len(notice) == 0 {
+		return
+	}
 	result["_notice"] = notice
+}
+
+func SkillsNoticePayload() map[string]any {
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return nil
+	}
+	status, err := skillstate.ReadStatus(home, build.Version)
+	if err != nil || status == nil || status.InSync {
+		return nil
+	}
+	return map[string]any{
+		"current": status.Current,
+		"target":  status.Target,
+		"command": status.Command,
+		"message": fmt.Sprintf("MediaKit skills are not synced: current %s, target %s, run: %s",
+			displayVersion(status.Current), status.Target, status.Command),
+	}
+}
+
+func displayVersion(version string) string {
+	if version == "" {
+		return "missing"
+	}
+	return version
 }
 
 // PrintStderrNag prints an unobtrusive update hint to stderr when an update is
