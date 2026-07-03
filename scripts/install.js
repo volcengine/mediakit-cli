@@ -200,6 +200,8 @@ function findBinary(rootDir, targetName) {
 }
 
 function installSkills() {
+  console.log("[mediakit-cli] Installing skills ...");
+  console.log(`[mediakit-cli] skills source: ${skillsDir}`);
   const result = spawnSync(
     "npx",
     ["-y", "skills", "add", skillsDir, "-g", "-y"],
@@ -211,6 +213,7 @@ function installSkills() {
   if (result.status !== 0) {
     throw new Error(`npx skills add failed with exit code ${result.status}`);
   }
+  console.log("[mediakit-cli] ✓ Skills installed");
 }
 
 async function install(options = {}) {
