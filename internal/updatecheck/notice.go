@@ -16,7 +16,7 @@ func NoticePayload() map[string]any {
 	return map[string]any{
 		"current": r.Current,
 		"latest":  r.Latest,
-		"command": fmt.Sprintf("npm install -g %s@latest", PackageName),
+		"command": "mediakit-cli update",
 		"message": fmt.Sprintf("New %s release available: %s -> %s", PackageName, r.Current, r.Latest),
 	}
 }
@@ -53,8 +53,8 @@ func PrintStderrNag(w io.Writer) {
 	if !isCharDevice(f) {
 		return
 	}
-	fmt.Fprintf(w, "\n[mediakit-cli] new version available: %s -> %s\n  run: npm install -g %s@latest\n",
-		r.Current, r.Latest, PackageName)
+	fmt.Fprintf(w, "\n[mediakit-cli] new version available: %s -> %s\n  run: mediakit-cli update\n",
+		r.Current, r.Latest)
 }
 
 func isCharDevice(f *os.File) bool {

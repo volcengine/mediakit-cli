@@ -32,7 +32,7 @@ func newVersionCmd() *cobra.Command {
 						payload["error"] = r.Err.Error()
 					}
 					if r.HasUpdate {
-						payload["upgrade_command"] = fmt.Sprintf("npm install -g %s@latest", updatecheck.PackageName)
+						payload["upgrade_command"] = "mediakit-cli update"
 					}
 				}
 				encoder := json.NewEncoder(cmd.OutOrStdout())

@@ -20,15 +20,15 @@ func Execute() error {
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "mediakit-cli",
-		Short:             "MediaKit command line interface",
+		Use:   "mediakit-cli",
+		Short: "MediaKit command line interface",
 		Long: `MediaKit CLI provides system commands, domain navigation, and generated capability commands.
 
 One-click install (CLI + AI agent Skills):
   npx @volcengine/mediakit-cli install -y
 
 Update:
-  mediakit-cli update          # install latest via npm install -g
+  mediakit-cli update          # update CLI and AI Agent Skills via npm
   mediakit-cli update --check  # only report status
   mediakit-cli version --check # show current vs latest
 
@@ -36,15 +36,8 @@ AI Agent Skills:
   mediakit-cli pairs with AI agent skills (Claude Code, etc.) that
   teach the agent MediaKit CLI patterns, best practices, and workflows.
 
-  Install all skills:
-    npx skills add volcengine/mediakit-cli -g -y
-
-  Or pick specific domains:
-    npx skills add volcengine/mediakit-cli -s byted-mediakit-editing -y
-    npx skills add volcengine/mediakit-cli -s byted-mediakit-audio -y
-    npx skills add volcengine/mediakit-cli -s byted-mediakit-image -y
-    npx skills add volcengine/mediakit-cli -s byted-mediakit-video -y
-    npx skills add volcengine/mediakit-cli -s byted-mediakit-shared -y`,
+  Reinstall all skills:
+    npx @volcengine/mediakit-cli install --skills-only -y`,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		DisableAutoGenTag: true,

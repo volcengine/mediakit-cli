@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	buildinfo "mediakit-cli/internal/build"
@@ -13,16 +14,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	checkNow = func() *updatecheck.Result {
+		return updatecheck.CheckNow(3 * time.Second)
+	}
+	runNpmInstall    = runNpmInstallLatest
+	runSkillsInstall = runSkillsInstallFromPackage
+)
+
 func newUpdateCmd() *cobra.Command {
 	var checkOnly bool
+	var force bool
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:               "update",
-		Short:             "Check and apply mediakit-cli updates from the npm registry",
-		Long:              "Check the npm registry for the latest @volcengine/mediakit-cli release and optionally install it via npm install -g.",
+		Short:             "Update mediakit-cli",
+		Long:              "Update @volcengine/mediakit-cli from npm.",
 		Args:              cobra.NoArgs,
 		DisableAutoGenTag: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r := updatecheck.CheckNow(3 * time.Second)
+			r := checkNow()
 			if r == nil {
 				return writeUpdatePayload(cmd, map[string]any{
 					"current": buildinfo.Version,
@@ -40,27 +51,57 @@ func newUpdateCmd() *cobra.Command {
 				payload["action"] = "skipped"
 				return writeUpdatePayload(cmd, payload)
 			}
-			if !r.HasUpdate {
-				payload["action"] = "noop"
-				return writeUpdatePayload(cmd, payload)
-			}
-			payload["upgrade_command"] = fmt.Sprintf("npm install -g %s@latest", updatecheck.PackageName)
+			payload["upgrade_command"] = "mediakit-cli update"
 			if checkOnly {
 				payload["action"] = "check"
+				if !asJSON {
+					return writeUpdateCheckText(cmd, r)
+				}
 				return writeUpdatePayload(cmd, payload)
 			}
-			payload["action"] = "install"
-			if err := runNpmInstallLatest(cmd); err != nil {
-				payload["install_status"] = "failed"
-				payload["error"] = err.Error()
-				_ = writeUpdatePayload(cmd, payload)
-				return err
+
+			if r.HasUpdate {
+				payload["action"] = "install"
+				if !asJSON {
+					fmt.Fprintf(cmd.OutOrStdout(), "Updating mediakit-cli %s → %s via npm ...\n", r.Current, r.Latest)
+				}
+				if err := runNpmInstall(cmd); err != nil {
+					payload["install_status"] = "failed"
+					payload["error"] = err.Error()
+					if asJSON {
+						_ = writeUpdatePayload(cmd, payload)
+					}
+					return err
+				}
+				payload["install_status"] = "ok"
+			} else {
+				payload["action"] = "noop"
 			}
-			payload["install_status"] = "ok"
+
+			shouldInstallSkills := !r.HasUpdate && force
+			if shouldInstallSkills {
+				if !asJSON {
+					fmt.Fprintln(cmd.OutOrStdout(), "\nInstalling skills from the current npm package ...")
+				}
+				if err := runSkillsInstall(cmd); err != nil {
+					payload["skills_action"] = "failed"
+					payload["skills_error"] = err.Error()
+					if asJSON {
+						_ = writeUpdatePayload(cmd, payload)
+					}
+					return err
+				}
+				payload["skills_action"] = "installed"
+			}
+			if !asJSON {
+				return writeUpdateText(cmd, r, shouldInstallSkills)
+			}
 			return writeUpdatePayload(cmd, payload)
 		},
 	}
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "Only check for updates; do not install")
+	cmd.Flags().BoolVar(&force, "force", false, "Force reinstall skills from the current npm package even when CLI is already up to date")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output structured JSON")
 	return cmd
 }
 
@@ -71,6 +112,30 @@ func writeUpdatePayload(cmd *cobra.Command, payload map[string]any) error {
 	return encoder.Encode(payload)
 }
 
+func writeUpdateCheckText(cmd *cobra.Command, r *updatecheck.Result) error {
+	if r.HasUpdate {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(),
+			"Update available: %s → %s\n  Release:   https://www.npmjs.com/package/%s/v/%s\n\nRun `mediakit-cli update` to install.\n",
+			r.Current, r.Latest, updatecheck.PackageName, r.Latest)
+		return err
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "mediakit-cli %s is already up to date\n", r.Current)
+	return err
+}
+
+func writeUpdateText(cmd *cobra.Command, r *updatecheck.Result, skillsInstalled bool) error {
+	if r.HasUpdate {
+		fmt.Fprintf(cmd.OutOrStdout(), "\n✓ Successfully updated mediakit-cli and skills from %s to %s\n", r.Current, r.Latest)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "mediakit-cli %s is already up to date\n", r.Current)
+	}
+	if skillsInstalled {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "✓ Skills installed from the current npm package")
+		return err
+	}
+	return nil
+}
+
 func runNpmInstallLatest(cmd *cobra.Command) error {
 	target := fmt.Sprintf("%s@latest", updatecheck.PackageName)
 	c := exec.Command("npm", "install", "-g", target)
@@ -79,18 +144,31 @@ func runNpmInstallLatest(cmd *cobra.Command) error {
 	return c.Run()
 }
 
+func runSkillsInstallFromPackage(cmd *cobra.Command) error {
+	c := exec.Command("npx", "-y", updatecheck.PackageName, "install", "--skills-only", "-y")
+	c.Stdout = os.Stderr
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+func normalizeVersion(version string) string {
+	version = strings.TrimSpace(version)
+	version = strings.TrimPrefix(version, "v")
+	return strings.TrimPrefix(version, "V")
+}
+
 // newUpdateRefreshCmd is the hidden entry the detached refresh subprocess runs.
 // It fetches the latest version and writes the cache, with no output. The empty
 // persistent hooks override the root's update-notice hooks so the child never
 // re-spawns itself or prints a nag.
 func newUpdateRefreshCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "__update-refresh",
-		Hidden:             true,
-		Args:               cobra.NoArgs,
-		DisableAutoGenTag:  true,
-		PersistentPreRun:   func(cmd *cobra.Command, args []string) {},
-		PersistentPostRun:  func(cmd *cobra.Command, args []string) {},
+		Use:               "__update-refresh",
+		Hidden:            true,
+		Args:              cobra.NoArgs,
+		DisableAutoGenTag: true,
+		PersistentPreRun:  func(cmd *cobra.Command, args []string) {},
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			updatecheck.RunRefresh()
 			return nil
