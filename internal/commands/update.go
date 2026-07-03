@@ -125,7 +125,9 @@ func writeUpdateCheckText(cmd *cobra.Command, r *updatecheck.Result) error {
 
 func writeUpdateText(cmd *cobra.Command, r *updatecheck.Result, skillsInstalled bool) error {
 	if r.HasUpdate {
-		fmt.Fprintf(cmd.OutOrStdout(), "\n✓ Successfully updated mediakit-cli and skills from %s to %s\n", r.Current, r.Latest)
+		fmt.Fprintf(cmd.OutOrStdout(), "\n✓ Successfully updated mediakit-cli from %s to %s\n\n", r.Current, r.Latest)
+		fmt.Fprintln(cmd.OutOrStdout(), "Updating skills ...")
+		fmt.Fprintln(cmd.OutOrStdout(), "✓ Skills updated")
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "mediakit-cli %s is already up to date\n", r.Current)
 	}

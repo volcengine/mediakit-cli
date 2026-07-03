@@ -7,6 +7,7 @@ const path = require('node:path')
 const pkg = require('../package.json')
 
 const PACKAGE_NAME = pkg.name || '@volcengine/mediakit-cli'
+const PACKAGE_SPEC = `${PACKAGE_NAME}@${pkg.version}`
 const SKILLS_DIR = path.join(__dirname, '..', 'skills')
 
 function parseArgs(argv) {
@@ -82,9 +83,14 @@ function whichSync(cmd) {
 
 function runNpmInstall(target) {
   log(`installing ${target} via npm install -g`)
-  const result = spawnSync('npm', ['install', '-g', target], {
-    stdio: 'inherit',
-  })
+  log('Installing skills ...')
+  const result = spawnSync(
+    'npm',
+    ['install', '-g', target, '--foreground-scripts', '--ignore-scripts=false'],
+    {
+      stdio: 'inherit',
+    },
+  )
   if (result.error) {
     throw result.error
   }
@@ -93,6 +99,8 @@ function runNpmInstall(target) {
       `npm install -g ${target} failed with exit code ${result.status}`,
     )
   }
+  log(`✓ Successfully installed mediakit-cli ${pkg.version}`)
+  log('✓ Skills installed')
 }
 
 function runSkillsAdd(opts) {
@@ -114,6 +122,7 @@ function runSkillsAdd(opts) {
   if (result.status !== 0) {
     throw new Error(`npx skills add failed with exit code ${result.status}`)
   }
+  log('✓ Skills installed')
 }
 
 async function runInstallWizard(rawArgs) {
@@ -124,7 +133,7 @@ async function runInstallWizard(rawArgs) {
   }
 
   if (!opts.skillsOnly) {
-    runNpmInstall(PACKAGE_NAME)
+    runNpmInstall(PACKAGE_SPEC)
   }
 
   if (opts.skillsOnly && !opts.cliOnly) {
