@@ -231,8 +231,8 @@ func (e *DependencyError) Error() string {
 func (e *DependencyError) StructuredError() map[string]any {
 	return map[string]any{
 		"error": map[string]any{
-			"type":          "environment_error",
-			"code":          "dependency_missing",
+			"type":          "EnvironmentError",
+			"code":          "DependencyMissing",
 			"message":       fmt.Sprintf("命令 %s 所需本地依赖缺失: %s", e.Command, strings.Join(e.Missing, ", ")),
 			"install_guide": cliconfig.InstallGuide(e.Missing),
 		},

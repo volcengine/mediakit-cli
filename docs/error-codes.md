@@ -85,8 +85,8 @@
 ```json
 {
   "error": {
-    "type": "invalid_parameter | security_violation | environment_error | execution_error",
-    "code": "missing_required_param | invalid_param_type | param_out_of_range | param_insufficient | unsupported_value | forbidden_operation | not_whitelisted | unsafe_characters | handler_not_implemented | local_unsupported | dependency_missing | execution_failed | download_failed | unknown",
+    "type": "InvalidParameter | SecurityViolation | EnvironmentError | ExecutionError",
+    "code": "MissingRequiredParam | InvalidParamType | ParamOutOfRange | ParamInsufficient | UnsupportedValue | ForbiddenOperation | NotWhitelisted | UnsafeCharacters | HandlerNotImplemented | LocalUnsupported | DependencyMissing | ExecutionFailed | DownloadFailed | Unknown",
     "message": "<原始错误信息（不截断、不摘要）>"
   }
 }
