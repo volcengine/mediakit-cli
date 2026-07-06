@@ -47,6 +47,10 @@ archives:
 checksum:
   name_template: checksums.txt
 
+release:
+  prerelease: auto
+  make_latest: "{{ if .Prerelease }}false{{ else }}true{{ end }}"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 

@@ -3171,7 +3171,7 @@ func classifyErrorType(err error) string {
 	case strings.Contains(msg, "禁止") ||
 		strings.Contains(msg, "不在白名单") ||
 		strings.Contains(msg, "不安全字符"):
-		return "security_violation"
+		return "SecurityViolation"
 	case strings.Contains(msg, "必填参数") ||
 		strings.Contains(msg, "必须是") ||
 		strings.Contains(msg, "取值范围") ||
@@ -3179,13 +3179,13 @@ func classifyErrorType(err error) string {
 		strings.Contains(msg, "仅支持") ||
 		strings.Contains(msg, "必须大于") ||
 		strings.Contains(msg, "必须大于等于"):
-		return "invalid_parameter"
+		return "InvalidParameter"
 	case strings.Contains(msg, "本地处理器未实现") ||
 		strings.Contains(msg, "不支持本地执行") ||
 		strings.Contains(msg, "本地依赖"):
-		return "environment_error"
+		return "EnvironmentError"
 	default:
-		return "execution_error"
+		return "ExecutionError"
 	}
 }
 
@@ -3193,37 +3193,37 @@ func classifyErrorCode(err error) string {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "禁止"):
-		return "forbidden_operation"
+		return "ForbiddenOperation"
 	case strings.Contains(msg, "不在白名单"):
-		return "not_whitelisted"
+		return "NotWhitelisted"
 	case strings.Contains(msg, "不安全字符"):
-		return "unsafe_characters"
+		return "UnsafeCharacters"
 	case strings.Contains(msg, "必填参数"):
-		return "missing_required_param"
+		return "MissingRequiredParam"
 	case strings.Contains(msg, "必须大于等于"):
-		return "param_out_of_range"
+		return "ParamOutOfRange"
 	case strings.Contains(msg, "必须大于"):
-		return "param_out_of_range"
+		return "ParamOutOfRange"
 	case strings.Contains(msg, "取值范围"):
-		return "param_out_of_range"
+		return "ParamOutOfRange"
 	case strings.Contains(msg, "必须是"):
-		return "invalid_param_type"
+		return "InvalidParamType"
 	case strings.Contains(msg, "至少需要"):
-		return "param_insufficient"
+		return "ParamInsufficient"
 	case strings.Contains(msg, "仅支持"):
-		return "unsupported_value"
+		return "UnsupportedValue"
 	case strings.Contains(msg, "本地处理器未实现"):
-		return "handler_not_implemented"
+		return "HandlerNotImplemented"
 	case strings.Contains(msg, "不支持本地执行"):
-		return "local_unsupported"
+		return "LocalUnsupported"
 	case strings.Contains(msg, "本地依赖"):
-		return "dependency_missing"
+		return "DependencyMissing"
 	case strings.Contains(msg, "download failed"):
-		return "download_failed"
+		return "DownloadFailed"
 	case strings.Contains(msg, "执行失败"):
-		return "execution_failed"
+		return "ExecutionFailed"
 	default:
-		return "unknown"
+		return "Unknown"
 	}
 }
 

@@ -36,6 +36,7 @@ const RELEASE_BASE_URL =
 const TMP_PREFIX = "mediakit-cli-install-";
 const packageRoot = path.resolve(__dirname, "..");
 const binDir = path.join(packageRoot, "bin");
+const skillsDir = path.join(packageRoot, "skills");
 
 const platformMap = {
   darwin: "darwin",
@@ -198,9 +199,46 @@ function findBinary(rootDir, targetName) {
   return null;
 }
 
+function installSkills() {
+  console.log("[mediakit-cli] Installing skills ...");
+  console.log(`[mediakit-cli] skills source: ${skillsDir}`);
+  const result = spawnSync(
+    "npx",
+    ["-y", "skills", "add", skillsDir, "-g", "-y"],
+    { stdio: "inherit" }
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`npx skills add failed with exit code ${result.status}`);
+  }
+  writeSkillsState();
+  console.log("[mediakit-cli] ✓ Skills installed");
+}
+
+function writeSkillsState() {
+  const stateFile = path.join(os.homedir(), ".mediakit", "skills-state.json");
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(
+    stateFile,
+    `${JSON.stringify(
+      {
+        package_name: pkg.name || "@volcengine/mediakit-cli",
+        version: pkg.version,
+        skills_dir: skillsDir,
+        installed_at: new Date().toISOString(),
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 async function install(options = {}) {
   if (readEnv("MEDIAKIT_CLI_SKIP_DOWNLOAD", "MEDIKIT_CLI_SKIP_DOWNLOAD") === "1") {
     console.log("[mediakit-cli] skip download because MEDIAKIT_CLI_SKIP_DOWNLOAD=1");
+    installSkills();
     return;
   }
 
@@ -211,6 +249,7 @@ async function install(options = {}) {
   const targetBinary = path.join(binDir, binaryName());
 
   if (!options.force && fs.existsSync(targetBinary)) {
+    installSkills();
     return;
   }
 
@@ -246,6 +285,7 @@ async function install(options = {}) {
   }
 
   console.log(`[mediakit-cli] installed ${targetBinary}`);
+  installSkills();
 }
 
 if (require.main === module) {
