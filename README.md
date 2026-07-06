@@ -1,143 +1,189 @@
 # AI MediaKit CLI
 
-[简体中文](./README.zh.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.22-blue.svg)](https://go.dev/)
+[![npm version](https://img.shields.io/npm/v/@volcengine/mediakit-cli.svg)](https://www.npmjs.com/package/@volcengine/mediakit-cli)
 
-<p align="center">
-  <img src="./assets/cover.en.png" alt="AI MediaKit CLI — interface rebuilt for LLMs · agent-native · cloud + local" width="880" />
-</p>
+[中文版](./README.md) | [English](./README.en.md)
 
-> The agent-native command-line toolkit for audio & video. Run Volcengine's cloud AI and local editing through **one unified command** — built to be driven by AI agents (Claude Code, Trae, Cursor …) or by you in the terminal.
+Mediakit 官方 CLI —— 兼容 FFmpeg 的命令面，同一条命令既能在本地跑 FFmpeg 完成裁剪 / 拼接 / 加字幕 / 混音 / 提取音频等剪辑操作，也能一键切到云端调用画质增强、字幕擦除、ASR、OCR、剧情线分析等 FFmpeg 做不到的 AI 能力。目前已覆盖视频、图像、音频等多模态原子能力和 5 个 AI Agent [Skills](./skills/)，未来预计提供 100+ 音视频原子能力。
 
-`mediakit-cli` packs video enhancement, subtitle removal, and a full editing toolbox into a single tool. Heavy AI runs in the cloud; lightweight editing runs locally — switch with one flag, same command surface.
+[安装](#安装与快速开始) · [AI Agent Skills](#agent-skills) · [鉴权](#鉴权) · [命令结构](#命令结构) · [进阶用法](#进阶用法) · [许可证](#许可证)
 
----
+## 为什么选 mediakit-cli？
 
-## ✨ What it can do
+- **完备的能力矩阵**：横跨视频、图像、音频三大模态，从裁剪 / 拼接 / 加字幕等底层处理，到画质增强、字幕擦除、ASR、OCR、剧情线分析等上层理解，一条命令覆盖预处理到成片输出的全链路。
+- **兼容 FFmpeg，无缝迁移**：本地模式基于 `ffmpeg` / `ffprobe`，覆盖裁剪、拼接、加图片、加字幕、调速、调音量、翻转、淡入淡出、混音、音视频合成、提取音频、绿幕抠图、元信息探测等常用能力，与 FFmpeg 命令直觉对齐；滤镜、图片转视频、拼接转场等复杂 / AI 能力交由云端处理。
+- **云端更快更强**：同一条命令加 `--cloud` 就能升维到 FFmpeg 做不到的能力 —— 画质增强 / 生成式画质修复、字幕擦除（标准版 / 精细化）、ASR、视频 OCR、高光智剪（短剧 / 小游戏）、剧情故事线分析、场景切分、绿幕 / 人像抠图等 AI 原子能力，云端弹性算力提供秒级并发。
+- **一命令双模态**：`--local` / `--cloud` 可逐命令切换，本地零成本 + 云端弹性算力互补；共用同一份参数与 `--schema`，Agent / 脚本零改造切换。
+- **高性价比处理**：依托云端弹性资源调度与闲时批量处理策略，为大批量媒体任务提供极具竞争力的价格，显著降低 AI 应用的整体 Token 消耗与运行成本。
 
-**40+ capabilities across 5 domains** — run `mediakit-cli --help-full` to list them all.
+## 功能
 
-| Domain               | Capabilities                                                                                                                                                                                                     | Runs on            | Status       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------ |
-| 🎬 **Editing** (17)  | trim · concat · watermark · subtitle · speed · volume · filter · flip · fade · mix · mux · extract audio · image-to-video                                                                                        | cloud **or** local | ✅ Available |
-| 🎚️ **Audio** (2)     | voice / background separation · audio metadata probe                                                                                                                                                             | cloud              | ✅ Available |
-| 🖼️ **Image AI** (5)  | enhance · object / text erase · quality scoring · OCR · background removal                                                                                                                                       | cloud              | ✅ Available |
-| 🎥 **Video AI** (14) | enhancement (+ generative restore) · subtitle removal · ASR subtitles · OCR · highlight clipping (short-drama / mini-game) · storyline analysis · scene split · portrait & green-screen matting · metadata probe | cloud              | ✅ Available |
-| 🔧 **Shared** (2)    | async task query · remote-file fetch                                                                                                                                                                             | local / cloud      | ✅ Available |
-| 🚧 **Coming**        | video translation · commentary generation · anime restyling                                                                                                                                                      | cloud              | Rolling out  |
+| 领域                | 能力                                                                                                                                                                                                                               | 运行             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 🎬 **剪辑** (17)    | 视频裁剪 · 音频裁剪 · 视频拼接 · 音频拼接 · 视频加图片 · 视频加字幕 · 视频调速 · 音频调速 · 调整视频音量 · 视频添加滤镜 · 视频画面翻转 · 视频声音淡入淡出 · 音频声音淡入淡出 · 音频混合 · 视频加音频 · 提取音频 · 图片转视频       | 云端 **或** 本地 |
+| 🎚️ **音频** (2)     | 人声背景音分离 · 音频元信息获取                                                                                                                                                                                                    | 云端             |
+| 🖼️ **图像 AI** (5)  | 图像画质增强 · 图像擦除修复 · 图像画质评估 · 图像文字识别 OCR · 图像背景移除                                                                                                                                                       | 云端             |
+| 🎥 **视频 AI** (14) | 画质增强 · 生成式画质增强 · 字幕擦除（标准版）· 精细化字幕擦除 · 语音转字幕（ASR）· 视频识别字幕（OCR）· 高光智剪-短剧 · 高光智剪-小游戏 · 高光片段提取 · 剧情故事线分析 · 场景切分 · 视频绿幕抠图 · 视频人像抠图 · 视频元信息获取 | 云端             |
+| 🔧 **通用** (2)     | 异步任务查询 · 远程文件拉取                                                                                                                                                                                                        | 本地 / 云端      |
+| 🚧 **即将上线**     | 视频翻译 · 解说生成 · 漫剧转绘（陆续上线）                                                                                                                                                                                         | 云端             |
 
-> AI capabilities run in the cloud (elastic compute, async). Editing runs **either** in the cloud **or** locally (sync, zero cost) — pick per command with `--cloud` / `--local`.
+## 安装与快速开始
 
----
+### 环境要求
 
-## 🚀 Quick Start
+开始之前，请确保具备以下条件：
+
+- Node.js `>=18`（`npm` / `npx`）
+
+- 本地模式：`ffmpeg` `5.1.x` 与 `ffprobe`
+
+### 快速开始（人类用户）
+
+#### 安装
+
+以下两种方式**任选其一**：
+
+**方式一 — 一键安装：**
 
 ```bash
-npm install -g @volcengine/mediakit-cli
-npx skills add volcengine/mediakit-cli -g -y   # optional — install agent Skills (Claude Code / Trae / Cursor …)
-export MEDIAKIT_API_KEY=<your-api-key>         # from the AI MediaKit console
+npx @volcengine/mediakit-cli install -y
+```
 
-# Cloud AI (async): enhance to 1080p, then poll for the result
+**方式二 — 从源码构建：**
+
+需要 Go `v1.22`+。
+
+```bash
+git clone https://github.com/volcengine/mediakit-cli.git
+cd mediakit-cli
+make build          # 产物：.mediakit/build/dev/mediakit-cli
+
+# 从本地 skills 目录安装 AI Agent Skills（必需）
+npx -y skills add ./skills -g -y
+```
+
+#### 配置与使用
+
+```bash
+# 1. 初始化配置（交互式引导）
+mediakit-cli init
+
+# 2. 环境自检（检查云端连通性、本地依赖、安装建议）
+mediakit-cli doctor
+
+# 3. 本地剪辑（同步、无需 API Key）：本机运行 FFmpeg 完成裁剪
+mediakit-cli --local editing trim-video --video-url ./in.mp4 --start-time 3 --end-time 8
+
+# 4. 云端 AI（异步）：将视频画质增强至 1080p，然后轮询获取最终结果
 mediakit-cli --cloud video enhance-video --video-url <url> --resolution 1080p
 mediakit-cli shared query-task --task-id <task_id> --poll-complete
-
-# Local editing (sync, no key needed): runs on your machine
-mediakit-cli --local editing trim-video --video-url ./in.mp4 --start-time 3 --end-time 8
 ```
 
----
+### 快速开始（AI Agent）
 
-## 📦 Install
+> 以下步骤面向 AI Agent，全流程支持无人值守。
+
+**第 1 步 — 安装**
 
 ```bash
-# One-click install (CLI + AI agent Skills)
 npx @volcengine/mediakit-cli install -y
-
-# npm only (CLI, recommended, cross-platform — pulls the right build for your OS / arch)
-npm install -g @volcengine/mediakit-cli
-
-# npx (no install)
-npx @volcengine/mediakit-cli version
-
-# curl (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/volcengine/mediakit-cli/main/scripts/install.sh | bash
 ```
 
-Pin a version or path: `VERSION=<version> INSTALL_DIR="$HOME/.local/bin" curl -fsSL …/install.sh | bash`
-
-Verify: `mediakit-cli doctor` (checks cloud readiness + local tool deps + install hints).
-
-### Update
-
-The CLI checks the npm registry for new releases once a day (TTL 24h). When an update is available you'll see a hint in `stderr` and a `_notice.update` field in the stdout JSON.
+**第 2 步 — 非交互式初始化（`--yes` 模式）**
 
 ```bash
-mediakit-cli version --check       # report current vs latest as JSON
-mediakit-cli update --check        # check only, no install
-mediakit-cli update                # install the latest via `npm install -g`
+# API Key 获取地址：https://console.volcengine.com/imp/ai-mediakit/settings
+mediakit-cli init \
+  --mode cloud-first \
+  --api-key <your-api-key> \
+  --yes
 ```
 
-Suppress the check with `MEDIAKIT_DISABLE_UPDATE_CHECK=1` or in CI (`CI` env set).
-
----
-
-## 🤖 Use with AI Agents
-
-`mediakit-cli` ships **AI agent Skills** that teach an agent how to call it — so a user can just say _"enhance this video to 1080p and trim the best 5 seconds"_ and the agent orchestrates the commands.
+**第 3 步 — 验证**
 
 ```bash
-# One command installs the Skills into every supported agent on your machine
-npx skills add volcengine/mediakit-cli -g -y
+mediakit-cli doctor
+mediakit-cli version
 ```
 
-This auto-detects and installs to **10+ runtimes** — Claude Code, Trae (CN & Global), Cursor, Codex, Gemini CLI, GitHub Copilot, OpenCode, OpenClaw, Antigravity, and more.
+## Agent Skills
 
-Every capability is also **MCP-compatible** — `mediakit-cli <domain> <tool> --schema` emits a JSON Schema for MCP / Anthropic Tool Use / function-calling, no hand-written adapter needed.
+| Skill                    | 说明                                                                                                                                                                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `byted-mediakit-shared`  | 通用能力：查询任务，其它 skill 依赖此项                                                                                                                                                                                           |
+| `byted-mediakit-editing` | 剪辑：视频裁剪、音频裁剪、视频拼接、音频拼接、视频加图片、视频加字幕、视频调速、音频调速、调整视频音量、视频添加滤镜、视频画面翻转、视频声音淡入淡出、音频声音淡入淡出、音频混合、视频加音频、提取音频、图片转视频                |
+| `byted-mediakit-audio`   | 音频：人声背景音分离、音频元信息获取                                                                                                                                                                                              |
+| `byted-mediakit-image`   | 图像 AI：图像画质增强、图像擦除修复、图像画质评估、图像文字识别 OCR、图像背景移除                                                                                                                                                 |
+| `byted-mediakit-video`   | 视频 AI：画质增强、生成式画质增强、字幕擦除（标准版）、精细化字幕擦除、语音转字幕（ASR）、视频识别字幕（OCR）、高光智剪-短剧、高光智剪-小游戏、高光片段提取、剧情故事线分析、场景切分、视频绿幕抠图、视频人像抠图、视频元信息获取 |
 
----
+## 鉴权
 
-## 🧩 How it works
-
-- **Two modes, one command surface.** `--cloud` runs heavy AI in Volcengine's cloud (elastic compute, async `task_id`); `--local` runs deterministic editing locally (sync, zero cloud cost). Default mode is `cloud-first`; per-command flags override it.
-- **Command structure:** `mediakit-cli [--cloud|--local] <domain> <tool> [flags]` — domains are `editing` · `audio` · `image` · `video` · `shared`.
-- **Outputs:** cloud results are returned as URLs; local results write to `~/.mediakit/temp` (override with `--output-path` or `MEDIAKIT_OUTPUT_PATH`).
-
----
-
-## 📖 Documentation
-
-- Volcengine AI MediaKit product docs & pricing: https://www.volcengine.com/docs/6448
-- Full command reference & FAQ: see the docs site.
-- [Error codes & exit code contract](./docs/error-codes.md) — stdout JSON protocol and exit-code rules.
-
----
-
-## 🛠 Development
+`mediakit-cli` 采用极简鉴权：只需一个 API Key，无需 OAuth / STS / IAM 角色配置。
 
 ```bash
-make build          # local build → .mediakit/build/dev/mediakit-cli
-make build-all      # all platforms
-make snapshot       # snapshot release
+# 方式 A：init 时选择存储方式（config / shell / export）
+mediakit-cli init --api-key <your-api-key> --credential-store config --yes
+
+# 方式 B：临时通过环境变量注入
+export MEDIAKIT_API_KEY=<your-api-key>
+export MEDIAKIT_OUTPUT_PATH=<optional-custom-endpoint>
 ```
 
-Releases are produced via `.goreleaser.yml`; npm distribution via `package.json` + `scripts/install.js`; curl install via `scripts/install.sh`.
+| 环境变量               | 说明                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `MEDIAKIT_API_KEY`     | 云端 API Key（[控制台获取](https://console.volcengine.com/imp/ai-mediakit/settings)） |
+| `MEDIAKIT_OUTPUT_PATH` | 本地模式输出目录，默认 `~/.mediakit/temp`                                             |
 
-<details>
-<summary><b>Local Tool Admission</b> (FFmpeg policy)</summary>
+## 命令结构
 
-- `ffmpeg` / `ffprobe`: required, `5.1.x`, `LGPL v2.1 or later`, commercial use allowed
-- Optional FFmpeg features: `openh264`, `libmp3lame`, `libass`, `libfreetype`, `libfontconfig`, `libfribidi`, `libharfbuzz`, `zlib`, `libpng`, `libjpeg-turbo`
-- Boundary: external process execution only (no static/dynamic linking of local tools into the Go binary); FFmpeg stays in LGPL mode by default; no `non-free` components; no local intermediate artifacts retained (only final outputs + `fetch-file` downloads).
+```
+mediakit-cli [--cloud|--local] <domain> <tool> [flags]
+```
 
-</details>
+- **两种模式，同一命令面**：`--cloud` 走云端弹性算力（异步返回 `task_id`）；`--local` 走本地 FFmpeg（同步、零成本）。默认为 `cloud-first`，可用 `--cloud` / `--local` 逐命令覆盖。
+- **输出**：云端结果以 URL 返回；本地结果落到 `~/.mediakit/temp`（可用 `--output-path` 或 `MEDIAKIT_OUTPUT_PATH` 覆盖）。
 
----
+系统命令：
 
-## License
+| 命令                                         | 说明                                                        |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| `mediakit-cli init [--yes]`                  | 初始化配置，支持交互式或非交互式（Agent 友好）              |
+| `mediakit-cli doctor`                        | 检查云端连通性、本地依赖与安装建议                          |
+| `mediakit-cli config`                        | 查看 / 修改配置项                                           |
+| `mediakit-cli version [--check]`             | 显示版本；`--check` 对比 npm 最新版                         |
+| `mediakit-cli update [--check]`              | 通过 `npm install -g` 更新 CLI 和 Skills；`--check` 只检查不安装 |
+| `mediakit-cli --domains`                     | 列出所有域                                                  |
+| `mediakit-cli --help-full`                   | 列出全部能力索引                                            |
+| `mediakit-cli <domain> <tool> --schema`      | 输出该能力的 JSON Schema（Mode / Async / 轮询命令等元信息） |
+| `mediakit-cli shared query-task --task-id X` | 查询异步任务；加 `--poll-complete` 轮询至终态               |
 
-This project is open-sourced under the [MIT License](./LICENSE).
+## 进阶用法
 
-This software calls MediaKit APIs at runtime. Use of these APIs is subject to the following terms and privacy policies:
+### Schema 自省
 
-- [Video Cloud Service Special Terms](https://www.volcengine.com/docs/6448/79646?lang=zh)
-- [Intelligent Processing Service Billing Rules](https://www.volcengine.com/docs/6448/104992?lang=zh)
-- [Intelligent Processing Service Level Agreement](https://www.volcengine.com/docs/6448/79648?lang=zh)
+每个能力命令都支持 `--schema`，输出输入 / 输出 schema、Mode 与 Async 信息，供 Agent 动态发现工具能力：
+
+```bash
+mediakit-cli video enhance-video --schema
+mediakit-cli --local editing trim-video --schema
+```
+
+### 本地模式输出命名
+
+本地模式输出文件按以下优先级命名：
+
+1. 显式 `--output-path` 指定完整文件路径（含扩展名）→ 直接使用
+2. 有输入文件名 → `{原文件名}_{工具名}.{ext}`；同名文件已存在时追加 6 位随机数字
+3. 无输入文件名 → `{工具名}-{时间戳}.{ext}`
+
+## 许可证
+
+本项目基于 **MIT 许可证** 开源。
+
+该软件运行时会调用 MediaKit 云端 API，使用这些 API 需要遵守如下协议：
+
+- [视频云服务专有条款](https://www.volcengine.com/docs/6448/79646?lang=zh)
+- [智能处理服务计费规则](https://www.volcengine.com/docs/6448/104992?lang=zh)
+- [智能处理服务 SLA](https://www.volcengine.com/docs/6448/79648?lang=zh)

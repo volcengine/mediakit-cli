@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"mediakit-cli/internal/build"
 	cliconfig "mediakit-cli/internal/config"
 )
 
@@ -86,8 +87,9 @@ func (c *Client) newRequest(method string, path string, query map[string]any, bo
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-surface", resolveSurface(c.Surface))
-	req.Header.Set("x-runtime", resolveRuntime(c.Runtime))
+	req.Header.Set("X-Amk-Task-Runtime", resolveRuntime(c.Runtime))
 	req.Header.Set("X-Amk-Task-Source", "cli")	
+	req.Header.Set("X-Amk-Cli-Version", build.Version)	
 	if c.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}

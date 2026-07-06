@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 
 const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 
 const pkg = require('../package.json')
 
 const PACKAGE_NAME = pkg.name || '@volcengine/mediakit-cli'
-const SKILL_REPO = 'volcengine/mediakit-cli'
+const PACKAGE_SPEC = `${PACKAGE_NAME}@${pkg.version}`
+const SKILLS_DIR = path.join(__dirname, '..', 'skills')
 
 function parseArgs(argv) {
   const opts = {
@@ -14,7 +17,6 @@ function parseArgs(argv) {
     skillsOnly: false,
     skills: [],
     yes: false,
-    versionTag: pkg.version || 'latest',
   }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -38,17 +40,11 @@ function parseArgs(argv) {
         }
         break
       }
-      case '--version': {
-        const next = argv[i + 1]
-        if (next && !next.startsWith('-')) {
-          opts.versionTag = next
-          i++
-        }
-        break
-      }
+      case '--version':
+        throw new Error('--version is not supported; install the npm package version you want directly')
       default:
         if (a.startsWith('--version=')) {
-          opts.versionTag = a.slice('--version='.length)
+          throw new Error('--version is not supported; install the npm package version you want directly')
         } else if (a.startsWith('--skills=')) {
           opts.skills.push(
             ...a
@@ -69,17 +65,33 @@ function log(msg) {
 }
 
 function whichSync(cmd) {
-  const probe = process.platform === 'win32' ? 'where' : 'command'
-  const probeArgs = process.platform === 'win32' ? [cmd] : ['-v', cmd]
-  const result = spawnSync(probe, probeArgs, { stdio: 'ignore', shell: true })
-  return result.status === 0
+  const pathValue = process.env.PATH || ''
+  const extensions =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';')
+      : ['']
+  for (const dir of pathValue.split(path.delimiter)) {
+    if (!dir) continue
+    for (const ext of extensions) {
+      const candidate = path.join(dir, `${cmd}${ext}`)
+      if (fs.existsSync(candidate)) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 function runNpmInstall(target) {
   log(`installing ${target} via npm install -g`)
-  const result = spawnSync('npm', ['install', '-g', target], {
-    stdio: 'inherit',
-  })
+  log('Installing skills ...')
+  const result = spawnSync(
+    'npm',
+    ['install', '-g', target, '--foreground-scripts', '--ignore-scripts=false'],
+    {
+      stdio: 'inherit',
+    },
+  )
   if (result.error) {
     throw result.error
   }
@@ -88,17 +100,18 @@ function runNpmInstall(target) {
       `npm install -g ${target} failed with exit code ${result.status}`,
     )
   }
+  log(`✓ Successfully installed mediakit-cli ${pkg.version}`)
+  log('✓ Skills installed')
 }
 
 function runSkillsAdd(opts) {
-  const args = ['-y', 'skills', 'add', SKILL_REPO]
-  if (opts.skills.length === 0) {
-    args.push('-g')
-  } else {
+  const args = ['-y', 'skills', 'add', SKILLS_DIR]
+  if (opts.skills.length > 0) {
     for (const skill of opts.skills) {
       args.push('-s', skill)
     }
   }
+  args.push('-g')
   if (opts.yes) {
     args.push('-y')
   }
@@ -110,6 +123,26 @@ function runSkillsAdd(opts) {
   if (result.status !== 0) {
     throw new Error(`npx skills add failed with exit code ${result.status}`)
   }
+  writeSkillsState()
+  log('✓ Skills installed')
+}
+
+function writeSkillsState() {
+  const stateFile = path.join(os.homedir(), '.mediakit', 'skills-state.json')
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true })
+  fs.writeFileSync(
+    stateFile,
+    `${JSON.stringify(
+      {
+        package_name: PACKAGE_NAME,
+        version: pkg.version,
+        skills_dir: SKILLS_DIR,
+        installed_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+  )
 }
 
 async function runInstallWizard(rawArgs) {
@@ -120,10 +153,10 @@ async function runInstallWizard(rawArgs) {
   }
 
   if (!opts.skillsOnly) {
-    runNpmInstall(`${PACKAGE_NAME}@${opts.versionTag}`)
+    runNpmInstall(PACKAGE_SPEC)
   }
 
-  if (!opts.cliOnly) {
+  if (opts.skillsOnly && !opts.cliOnly) {
     if (!whichSync('npx')) {
       throw new Error('npx is required to install skills but not found in PATH')
     }
