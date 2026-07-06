@@ -82,9 +82,10 @@ func newUpdateCmd() *cobra.Command {
 					payload["skills_action"] = "failed"
 					payload["skills_error"] = err.Error()
 					if asJSON {
-						_ = writeUpdatePayload(cmd, payload)
+						return writeUpdatePayload(cmd, payload)
 					}
-					return err
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: skills update failed: %v\nRun: mediakit-cli update --force\n", err)
+					return nil
 				}
 				payload["skills_action"] = "installed"
 			} else {
@@ -196,11 +197,8 @@ func applySkillsStatus(payload map[string]any, r *updatecheck.Result) {
 	if err != nil {
 		return
 	}
-	target := r.Current
+	target := skillsTargetVersion(r)
 	command := "mediakit-cli update --force"
-	if r.Latest != "" {
-		target = r.Latest
-	}
 	if r.HasUpdate {
 		command = "mediakit-cli update"
 	}
@@ -216,6 +214,16 @@ func applySkillsStatus(payload map[string]any, r *updatecheck.Result) {
 		"missing": status.Missing,
 		"command": status.Command,
 	}
+}
+
+func skillsTargetVersion(r *updatecheck.Result) string {
+	if r == nil {
+		return ""
+	}
+	if r.HasUpdate && strings.TrimSpace(r.Latest) != "" {
+		return r.Latest
+	}
+	return r.Current
 }
 
 func normalizeVersion(version string) string {

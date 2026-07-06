@@ -60,17 +60,17 @@ func resolveRuntimeFrom(configRuntime string, environ []string) string {
 		return value
 	}
 
-	parts := make([]string, 0, 2)
-	for _, envName := range []string{envIdentityName, envOpenClawServiceMarker} {
-		if value := strings.TrimSpace(env[envName]); value != "" {
-			parts = append(parts, value)
-		}
+	identity := strings.TrimSpace(env[envIdentityName])
+	if strings.Contains(strings.ToLower(identity), "arkclaw") {
+		return "arkclaw"
 	}
-
-	if len(parts) == 0 {
-		return "unknown"
+	if hasNonEmptyEnvPrefix(env, "OPENCLAW_") {
+		return "openclaw"
 	}
-	return strings.Join(parts, "/")
+	if identity != "" {
+		return identity
+	}
+	return "unknown"
 }
 
 // detectClientEnvFrom identifies the calling IDE/Agent host from environment
@@ -82,18 +82,16 @@ func detectClientEnvFrom(environ []string) string {
 	env := parseEnviron(environ)
 
 	present := func(name string) bool { return strings.TrimSpace(env[name]) != "" }
-	hasPrefix := func(prefix string) bool {
-		for key := range env {
-			if strings.HasPrefix(key, prefix) {
-				return true
-			}
-		}
-		return false
+	containsValue := func(name string, needle string) bool {
+		return strings.Contains(strings.ToLower(strings.TrimSpace(env[name])), needle)
 	}
 
 	// First tier: strong, dedicated signals.
 	if strings.TrimSpace(env["CLAUDECODE"]) == "1" || present("CLAUDE_CODE_ENTRYPOINT") {
 		return "claude-code"
+	}
+	if hasNonEmptyEnvPrefix(env, "CODEX_") {
+		return "codex"
 	}
 	if strings.Contains(strings.ToLower(env[envTerminalEmulator]), "jetbrains") {
 		return "jetbrains"
@@ -104,13 +102,16 @@ func detectClientEnvFrom(environ []string) string {
 
 	// Second tier: VS Code fork combination check. Dedicated prefixes win over
 	// the shared TERM_PROGRAM=vscode fallback.
-	if present("CURSOR_TRACE_ID") {
+	if present("CURSOR_TRACE_ID") || hasNonEmptyEnvPrefix(env, "CURSOR_") {
 		return "cursor"
 	}
-	if hasPrefix("TRAE_") {
+	if hasNonEmptyEnvPrefix(env, "TRAE_") {
 		return "trae"
 	}
-	if hasPrefix("WINDSURF_") {
+	if hasNonEmptyEnvPrefix(env, "WINDSURF_") ||
+		containsValue("VSCODE_GIT_ASKPASS_MAIN", "windsurf") ||
+		containsValue("VSCODE_GIT_ASKPASS_NODE", "windsurf") ||
+		containsValue("__CFBundleIdentifier", "windsurf") {
 		return "windsurf"
 	}
 
@@ -137,6 +138,15 @@ func normalizeRuntime(value string) string {
 	if strings.Contains(lower, "claude") {
 		return "claude-code"
 	}
+	if strings.Contains(lower, "codex") {
+		return "codex"
+	}
+	if strings.Contains(lower, "openclaw") {
+		return "openclaw"
+	}
+	if strings.Contains(lower, "arkclaw") {
+		return "arkclaw"
+	}
 	if strings.Contains(lower, "jetbrains") {
 		return "jetbrains"
 	}
@@ -158,6 +168,17 @@ func normalizeRuntime(value string) string {
 	return lower
 }
 
+func PreviewHeaders(surface string, runtime string) map[string]string {
+	return map[string]string{
+		"Accept":            "application/json",
+		"Content-Type":      "application/json",
+		"x-surface":         resolveSurface(surface),
+		"X-Amk-Cli-Runtime": resolveRuntime(runtime),
+		"X-Amk-Task-Source": "cli",
+		"X-Amk-Cli-Version": build.Version,
+	}
+}
+
 func parseEnviron(environ []string) map[string]string {
 	env := make(map[string]string, len(environ))
 	for _, entry := range environ {
@@ -168,6 +189,15 @@ func parseEnviron(environ []string) map[string]string {
 		env[key] = value
 	}
 	return env
+}
+
+func hasNonEmptyEnvPrefix(env map[string]string, prefix string) bool {
+	for key, value := range env {
+		if strings.HasPrefix(key, prefix) && strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) newRequest(method string, path string, query map[string]any, body map[string]any) (*http.Request, error) {

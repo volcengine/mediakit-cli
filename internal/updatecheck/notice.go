@@ -63,7 +63,7 @@ func SkillsNoticePayload() map[string]any {
 	if err != nil {
 		return nil
 	}
-	status, err := skillstate.ReadStatus(home, r.Latest)
+	status, err := skillstate.ReadStatus(home, r.Current)
 	if err != nil || status == nil || status.InSync {
 		return nil
 	}
