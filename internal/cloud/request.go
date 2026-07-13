@@ -16,6 +16,8 @@ import (
 const (
 	envIdentityName          = "IDENTITY_NAME"
 	envOpenClawServiceMarker = "OPENCLAW_SERVICE_MARKER"
+	envTermProgram           = "TERM_PROGRAM"
+	envTerminalEmulator      = "TERMINAL_EMULATOR"
 )
 
 func resolveHeaderValue(envName string, configValue string, fallback string) string {
@@ -41,16 +43,26 @@ func resolveSurface(configSurface string) string {
 }
 
 func resolveRuntime(configRuntime string) string {
-	if value := strings.TrimSpace(os.Getenv(cliconfig.EnvRuntime)); value != "" {
-		return value
+	return resolveRuntimeFrom(configRuntime, os.Environ())
+}
+
+func resolveRuntimeFrom(configRuntime string, environ []string) string {
+	env := parseEnviron(environ)
+
+	if value := strings.TrimSpace(env[cliconfig.EnvRuntime]); value != "" {
+		return normalizeRuntime(value)
 	}
 	if value := strings.TrimSpace(configRuntime); value != "" {
+		return normalizeRuntime(value)
+	}
+
+	if value := detectClientEnvFrom(environ); value != "" {
 		return value
 	}
 
 	parts := make([]string, 0, 2)
 	for _, envName := range []string{envIdentityName, envOpenClawServiceMarker} {
-		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		if value := strings.TrimSpace(env[envName]); value != "" {
 			parts = append(parts, value)
 		}
 	}
@@ -59,6 +71,103 @@ func resolveRuntime(configRuntime string) string {
 		return "unknown"
 	}
 	return strings.Join(parts, "/")
+}
+
+// detectClientEnvFrom identifies the calling IDE/Agent host from environment
+// signals. Ordering matters: dedicated strong signals are checked before the
+// shared TERM_PROGRAM=vscode signal, because VS Code forks (Cursor, Trae,
+// Windsurf) all report TERM_PROGRAM=vscode and would otherwise be misdetected.
+// Returns an empty string when no client signal is present.
+func detectClientEnvFrom(environ []string) string {
+	env := parseEnviron(environ)
+
+	present := func(name string) bool { return strings.TrimSpace(env[name]) != "" }
+	hasPrefix := func(prefix string) bool {
+		for key := range env {
+			if strings.HasPrefix(key, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// First tier: strong, dedicated signals.
+	if strings.TrimSpace(env["CLAUDECODE"]) == "1" || present("CLAUDE_CODE_ENTRYPOINT") {
+		return "claude-code"
+	}
+	if strings.Contains(strings.ToLower(env[envTerminalEmulator]), "jetbrains") {
+		return "jetbrains"
+	}
+	if strings.EqualFold(strings.TrimSpace(env[envTermProgram]), "WarpTerminal") {
+		return "warp"
+	}
+
+	// Second tier: VS Code fork combination check. Dedicated prefixes win over
+	// the shared TERM_PROGRAM=vscode fallback.
+	if present("CURSOR_TRACE_ID") {
+		return "cursor"
+	}
+	if hasPrefix("TRAE_") {
+		return "trae"
+	}
+	if hasPrefix("WINDSURF_") {
+		return "windsurf"
+	}
+
+	term := strings.TrimSpace(env[envTermProgram])
+	if strings.EqualFold(term, "vscode") {
+		return "vscode"
+	}
+	if term != "" {
+		return strings.ToLower(term)
+	}
+
+	return ""
+}
+
+// normalizeRuntime maps a user-provided runtime identifier to its canonical
+// form, mirroring the keyword matching in detectClientEnvFrom so that injected
+// values (e.g. MEDIAKIT_RUNTIME=claude) produce the same result as auto-
+// detection (claude-code).
+func normalizeRuntime(value string) string {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return ""
+	}
+	if strings.Contains(lower, "claude") {
+		return "claude-code"
+	}
+	if strings.Contains(lower, "jetbrains") {
+		return "jetbrains"
+	}
+	if strings.Contains(lower, "warp") {
+		return "warp"
+	}
+	if strings.Contains(lower, "cursor") {
+		return "cursor"
+	}
+	if strings.Contains(lower, "trae") {
+		return "trae"
+	}
+	if strings.Contains(lower, "windsurf") {
+		return "windsurf"
+	}
+	if strings.Contains(lower, "vscode") {
+		return "vscode"
+	}
+	return lower
+}
+
+func parseEnviron(environ []string) map[string]string {
+	env := make(map[string]string, len(environ))
+	for _, entry := range environ {
+		key, value, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		env[key] = value
+	}
+	return env
 }
 
 func (c *Client) newRequest(method string, path string, query map[string]any, body map[string]any) (*http.Request, error) {
@@ -87,9 +196,9 @@ func (c *Client) newRequest(method string, path string, query map[string]any, bo
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-surface", resolveSurface(c.Surface))
-	req.Header.Set("X-Amk-Task-Runtime", resolveRuntime(c.Runtime))
-	req.Header.Set("X-Amk-Task-Source", "cli")	
-	req.Header.Set("X-Amk-Cli-Version", build.Version)	
+	req.Header.Set("X-Amk-Cli-Runtime", resolveRuntime(c.Runtime))
+	req.Header.Set("X-Amk-Task-Source", "cli")
+	req.Header.Set("X-Amk-Cli-Version", build.Version)
 	if c.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}

@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	checkNow = func() *updatecheck.Result {
-		return updatecheck.CheckNow(3 * time.Second)
+	checkNowFresh = func() *updatecheck.Result {
+		return updatecheck.CheckNow(3*time.Second, true)
 	}
-	runNpmInstall    = runNpmInstallLatest
-	runSkillsInstall = runSkillsInstallFromPackage
+	runNpmInstall              = runNpmInstallLatest
+	runSkillsInstall           = runSkillsInstallFromPackage
+	runSkillsInstallForVersion = runSkillsInstallFromPackageVersion
 )
 
 func newUpdateCmd() *cobra.Command {
@@ -35,7 +36,7 @@ func newUpdateCmd() *cobra.Command {
 		Args:              cobra.NoArgs,
 		DisableAutoGenTag: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r := checkNow()
+			r := checkNowFresh()
 			if r == nil {
 				return writeUpdatePayload(cmd, map[string]any{
 					"current": buildinfo.Version,
@@ -56,7 +57,7 @@ func newUpdateCmd() *cobra.Command {
 			payload["upgrade_command"] = "mediakit-cli update"
 			if checkOnly {
 				payload["action"] = "check"
-				applySkillsStatus(payload, r.Current)
+				applySkillsStatus(payload, r)
 				if !asJSON {
 					return writeUpdateCheckText(cmd, r)
 				}
@@ -77,6 +78,15 @@ func newUpdateCmd() *cobra.Command {
 					return err
 				}
 				payload["install_status"] = "ok"
+				if err := runSkillsInstallForVersion(cmd, r.Latest); err != nil {
+					payload["skills_action"] = "failed"
+					payload["skills_error"] = err.Error()
+					if asJSON {
+						_ = writeUpdatePayload(cmd, payload)
+					}
+					return err
+				}
+				payload["skills_action"] = "installed"
 			} else {
 				payload["action"] = "noop"
 			}
@@ -148,14 +158,22 @@ func runNpmInstallLatest(cmd *cobra.Command) error {
 }
 
 func runSkillsInstallFromPackage(cmd *cobra.Command) error {
-	c := exec.Command("npx", "-y", currentPackageSpec(), "install", "--skills-only", "-y")
+	return runSkillsInstallFromPackageVersion(cmd, buildinfo.Version)
+}
+
+func runSkillsInstallFromPackageVersion(cmd *cobra.Command, version string) error {
+	c := exec.Command("npx", "-y", packageSpecForVersion(version), "install", "--skills-only", "-y")
 	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
 }
 
 func currentPackageSpec() string {
-	version := normalizeVersion(buildinfo.Version)
+	return packageSpecForVersion(buildinfo.Version)
+}
+
+func packageSpecForVersion(version string) string {
+	version = normalizeVersion(version)
 	if version == "" {
 		return updatecheck.PackageName
 	}
@@ -173,15 +191,24 @@ func shouldInstallSkillsForVersion(version string, force bool) bool {
 	return !skillstate.InSync(home, version)
 }
 
-func applySkillsStatus(payload map[string]any, target string) {
+func applySkillsStatus(payload map[string]any, r *updatecheck.Result) {
 	home, err := cliconfig.ResolveHomeDir()
 	if err != nil {
 		return
+	}
+	target := r.Current
+	command := "mediakit-cli update --force"
+	if r.Latest != "" {
+		target = r.Latest
+	}
+	if r.HasUpdate {
+		command = "mediakit-cli update"
 	}
 	status, err := skillstate.ReadStatus(home, target)
 	if err != nil || status == nil {
 		return
 	}
+	status.Command = command
 	payload["skills_status"] = map[string]any{
 		"current": status.Current,
 		"target":  status.Target,

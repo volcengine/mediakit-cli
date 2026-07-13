@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -26,6 +27,7 @@ func newConfigSetCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newConfigSetModeCmd())
 	cmd.AddCommand(newConfigSetOutputPathCmd())
+	cmd.AddCommand(newConfigSetUpdateCheckCmd())
 	return cmd
 }
 
@@ -83,6 +85,53 @@ func newConfigSetOutputPathCmd() *cobra.Command {
 	}
 }
 
+func newConfigSetUpdateCheckCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "update-check [on|off]",
+		Short: "Enable or disable the automatic version update check",
+		Long:  "Enable or disable the automatic version update check. Default: on. The MEDIAKIT_DISABLE_UPDATE_CHECK env var overrides this setting.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			disabled, err := parseUpdateCheckToggle(args[0])
+			if err != nil {
+				return err
+			}
+			home, homeErr := cliconfig.ResolveHomeDir()
+			if homeErr != nil {
+				return homeErr
+			}
+			cfg, loadErr := cliconfig.LoadConfig(home)
+			if loadErr != nil {
+				return loadErr
+			}
+			cfg.DisableUpdateCheck = disabled
+			if err = cliconfig.SaveConfig(home, cfg); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "自动更新检查已%s\n配置文件：%s\n", updateCheckStateLabel(!disabled), cliconfig.ConfigFile(home))
+			return err
+		},
+	}
+}
+
+func parseUpdateCheckToggle(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on", "true", "enable", "enabled", "1":
+		return false, nil
+	case "off", "false", "disable", "disabled", "0":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid value %q: expected on or off", value)
+	}
+}
+
+func updateCheckStateLabel(enabled bool) string {
+	if enabled {
+		return "开启"
+	}
+	return "关闭"
+}
+
 func newConfigShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
@@ -102,7 +151,7 @@ func newConfigShowCmd() *cobra.Command {
 			}
 			_, err := fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"当前配置\n- mode: %s\n- api_key: %s (%s)\n- endpoint: %s (%s)\n- output_path: %s (%s)\n- credential_store: %s\n- config_file: %s\n- env_cache: %s\n- last_env_check: %s\n",
+				"当前配置\n- mode: %s\n- api_key: %s (%s)\n- endpoint: %s (%s)\n- output_path: %s (%s)\n- credential_store: %s\n- update_check: %s\n- config_file: %s\n- env_cache: %s\n- last_env_check: %s\n",
 				resolved.Mode,
 				displaySecret(resolved.APIKey),
 				resolved.APIKeySource,
@@ -111,6 +160,7 @@ func newConfigShowCmd() *cobra.Command {
 				resolved.OutputPath,
 				resolved.OutputPathSource,
 				resolved.CredentialStore,
+				updateCheckStateLabel(!resolved.DisableUpdateCheck),
 				resolved.ConfigPath,
 				resolved.EnvCachePath,
 				displayValueOrFallback(cache.CheckedAt, "never"),
