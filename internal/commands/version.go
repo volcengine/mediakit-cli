@@ -20,7 +20,7 @@ func newVersionCmd() *cobra.Command {
 		DisableAutoGenTag: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if checkUpdate {
-				r := updatecheck.CheckNow(2 * time.Second)
+				r := updatecheck.CheckNow(2*time.Second, true)
 				payload := map[string]any{
 					"current": buildinfo.Version,
 					"date":    buildinfo.Date,

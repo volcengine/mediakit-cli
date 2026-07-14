@@ -30,13 +30,14 @@ const (
 )
 
 type Config struct {
-	Mode            string `json:"mode"`
-	APIKey          string `json:"api_key,omitempty"`
-	Endpoint        string `json:"endpoint,omitempty"`
-	CredentialStore string `json:"credential_store,omitempty"`
-	OutputPath      string `json:"output_path,omitempty"`
-	Surface         string `json:"surface,omitempty"`
-	Runtime         string `json:"runtime,omitempty"`
+	Mode               string `json:"mode"`
+	APIKey             string `json:"api_key,omitempty"`
+	Endpoint           string `json:"endpoint,omitempty"`
+	CredentialStore    string `json:"credential_store,omitempty"`
+	OutputPath         string `json:"output_path,omitempty"`
+	Surface            string `json:"surface,omitempty"`
+	Runtime            string `json:"runtime,omitempty"`
+	DisableUpdateCheck bool   `json:"disable_update_check,omitempty"`
 }
 
 type ResolvedConfig struct {
@@ -52,6 +53,8 @@ type ResolvedConfig struct {
 	CredentialStore  string
 	Surface          string
 	Runtime          string
+
+	DisableUpdateCheck bool
 }
 
 type ToolStatus struct {
@@ -204,6 +207,8 @@ func ResolveConfig(home string) (ResolvedConfig, error) {
 		CredentialStore:  fileCfg.CredentialStore,
 		Surface:          fileCfg.Surface,
 		Runtime:          fileCfg.Runtime,
+
+		DisableUpdateCheck: fileCfg.DisableUpdateCheck,
 	}
 	if resolved.Mode == "" {
 		resolved.Mode = DefaultMode
@@ -234,6 +239,16 @@ func ResolveConfig(home string) (ResolvedConfig, error) {
 	resolved.OutputPath = outputPath
 	resolved.OutputPathSource = outputSource
 	return resolved, nil
+}
+
+// UpdateCheckDisabledByConfig reports whether the persisted config disables the
+// version update check. Missing or unreadable config is treated as "enabled".
+func UpdateCheckDisabledByConfig(home string) bool {
+	cfg, err := LoadConfig(home)
+	if err != nil {
+		return false
+	}
+	return cfg.DisableUpdateCheck
 }
 
 func LoadEnvCache(home string) (EnvCache, error) {
