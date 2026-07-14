@@ -56,21 +56,48 @@ func resolveRuntimeFrom(configRuntime string, environ []string) string {
 		return normalizeRuntime(value)
 	}
 
-	if value := detectClientEnvFrom(environ); value != "" {
-		return value
+	workspace := detectWorkspaceRuntimeFrom(environ)
+	client := detectClientEnvFrom(environ)
+	if workspace != "" && client != "" {
+		if workspace == client {
+			return workspace
+		}
+		return workspace + "," + client
+	}
+	if workspace != "" {
+		return workspace
+	}
+	if client != "" {
+		return client
 	}
 
-	identity := strings.TrimSpace(env[envIdentityName])
-	if strings.Contains(strings.ToLower(identity), "arkclaw") {
-		return "arkclaw"
-	}
 	if hasNonEmptyEnvPrefix(env, "OPENCLAW_") {
 		return "openclaw"
 	}
+	identity := strings.TrimSpace(env[envIdentityName])
 	if identity != "" {
 		return identity
 	}
 	return "unknown"
+}
+
+// detectWorkspaceRuntimeFrom identifies an outer workspace/sandbox host. This is
+// kept separate from detectClientEnvFrom so nested executions can report both
+// layers, for example "openclaw,claude-code".
+func detectWorkspaceRuntimeFrom(environ []string) string {
+	env := parseEnviron(environ)
+
+	if hasNonEmptyEnvPrefix(env, "OPENCLAW_") {
+		return "openclaw"
+	}
+	if hasNonEmptyEnvPrefix(env, "ARKCLAW_") ||
+		strings.Contains(strings.ToLower(strings.TrimSpace(env[envIdentityName])), "arkclaw") {
+		return "arkclaw"
+	}
+	if hasNonEmptyEnvPrefix(env, "HERMES_") {
+		return "hermes"
+	}
+	return ""
 }
 
 // detectClientEnvFrom identifies the calling IDE/Agent host from environment
