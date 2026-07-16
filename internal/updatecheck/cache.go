@@ -12,6 +12,10 @@ import (
 const (
 	CacheFileName = "update-check.json"
 	CacheTTL      = 24 * time.Hour
+
+	CacheStatusChecking = "checking"
+	CacheStatusReady    = "ready"
+	CacheStatusError    = "error"
 )
 
 type Cache struct {
@@ -19,6 +23,8 @@ type Cache struct {
 	Latest     string    `json:"latest"`
 	CheckedAt  time.Time `json:"checked_at"`
 	HasUpdate  bool      `json:"has_update"`
+	Status     string    `json:"status,omitempty"`
+	Error      string    `json:"error,omitempty"`
 	NotifiedAt time.Time `json:"notified_at,omitempty"`
 }
 
@@ -57,4 +63,17 @@ func IsCacheFresh(c *Cache, runningVersion string) bool {
 		return false
 	}
 	return true
+}
+
+func effectiveStatus(c *Cache) string {
+	if c == nil {
+		return ""
+	}
+	if c.Status != "" {
+		return c.Status
+	}
+	if c.Latest != "" {
+		return CacheStatusReady
+	}
+	return ""
 }
