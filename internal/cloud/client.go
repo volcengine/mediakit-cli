@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const defaultEndpoint = "https://amk.cn-beijing.volces.com"
+const defaultEndpoint = "https://mediakit.cn-beijing.volces.com/"
 
 type Client struct {
 	Endpoint   string

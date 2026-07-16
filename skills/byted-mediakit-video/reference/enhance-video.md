@@ -24,6 +24,7 @@
 | tool_version | `--tool-version` | string | 否 | standard | 工具版本，标准版:standard，专业版：professional，默认为标准版 |
 | resolution | `--resolution` | string | 否 | - | 目标分辨率。支持的取值如下所示。配置此参数后，不可同时配置resolution_limit字段 |
 | resolution_limit | `--resolution-limit` | integer | 否 | - | 目标长宽限制，用于指定输出视频的长边或短边的最大像素值，取值范围为 [64, 2160]。配置此参数后，不可同时配置resolution字段 |
+| bitrate_level | `--bitrate-level` | string | 否 | medium | 码率档位。输出视频的目标平均码率。取值：low（低码率）/ medium（中码率，推荐）/ high（高码率）。默认为 medium |
 | fps | `--fps` | number | 否 | - | 目标帧率，单位为 fps。取值范围为 (0, 120]。 |
 | callback_args | `--callback-args` | string | 否 | - | 可选，回调参数 |
 | client_token | `--client-token` | string | 否 | - | 可选，用于幂等，默认幂等，用户可根据需求进行调整 |

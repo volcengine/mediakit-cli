@@ -21,7 +21,7 @@ const (
 	EnvCacheName         = "env_cache.json"
 	UploadCacheName      = "upload_cache.json"
 	DefaultOutputDirName = "temp"
-	DefaultEndpoint      = "https://amk.cn-beijing.volces.com"
+	DefaultEndpoint      = "https://mediakit.cn-beijing.volces.com/"
 	EnvAPIKey            = "MEDIAKIT_API_KEY"
 	EnvEndpoint          = "MEDIAKIT_ENDPOINT"
 	EnvOutputPath        = "MEDIAKIT_OUTPUT_PATH"

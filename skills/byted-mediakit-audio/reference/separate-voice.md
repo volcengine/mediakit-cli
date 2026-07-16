@@ -4,7 +4,7 @@
 将音频中的人声与背景音精准分离，输出为两个独立的音轨文件。
 支持格式：主流音视频格式（如mp4、mov、mp3、m4a、wav等）。
 输入：video_url 和 audio_url 二选一。
-输出格式：AAC。
+输出格式：支持 mp3、wav、aac、m4a、flac，默认 aac。
 
 ## 执行方式
 
@@ -20,8 +20,9 @@
 ## 参数
 | 参数 | CLI flag | 类型 | 必填 | 默认值 | 说明 |
 |------|----------|------|------|--------|------|
-| video_url | `--video-url` | string | 否 | - | 输入视频 Url（需公网可访问），与audio_url二选一，都存在时优先取video_url |
-| audio_url | `--audio-url` | string | 否 | - | 输入音频 Url（需公网可访问），与video_url二选一，不能都为空 |
+| video_url | `--video-url` | string | 否 | - | 输入视频资源 Url，支持 http/https 直链或 mediakit/tos/vod 平台资源链接；与 audio_url 二选一，都存在时优先取 video_url |
+| audio_url | `--audio-url` | string | 否 | - | 输入视频资源 Url，支持 http/https 直链或 mediakit/tos/vod 平台资源链接；与 audio_url 二选一，不能都为空 |
+| output_format | `--output-format` | string | 否 | aac | 输出音频格式，支持 mp3、wav、aac、m4a、flac，默认 aac |
 | callback_args | `--callback-args` | string | 否 | - | 可选，回调参数 |
 | client_token | `--client-token` | string | 否 | - | 可选，用于幂等，默认幂等，用户可根据需求进行调整 |
 

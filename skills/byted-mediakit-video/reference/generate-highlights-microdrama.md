@@ -27,6 +27,8 @@
 | edit_param | `--edit-param` | object | 否 | - | 成片剪辑参数配置。CLI 传参时请使用 JSON 字符串，并用单引号包裹整个值 |
 | highlight_cuts_param | `--highlight-cuts-param` | object | 否 | - | 高光混剪参数配置。CLI 传参时请使用 JSON 字符串，并用单引号包裹整个值 |
 | opening_hook_param | `--opening-hook-param` | object | 否 | - | 精彩前置功能参数配置（可选）。CLI 传参时请使用 JSON 字符串，并用单引号包裹整个值 |
+| video_ending_mode | `--video-ending-mode` | string | 否 | - | 高光智剪视频结尾选取模式。ReuseMainEnding=优先复用正片剧集结尾；SmartSelect=智能选取模式。不传则由后端按默认策略兜底 |
+| enable_segment_tag | `--enable-segment-tag` | boolean | 否 | - | 是否在结果中输出高光片段/分镜的标签信息（tags 字段）。不传或 false = 不返回 tags；true = 在 clips 与 storyboard_info 中返回 tags，并透传给底层 |
 | callback_args | `--callback-args` | string | 否 | - | 可选，回调参数 |
 | client_token | `--client-token` | string | 否 | - | 可选，用于幂等，默认幂等，用户可根据需求进行调整 |
 

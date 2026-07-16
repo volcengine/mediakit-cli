@@ -1,14 +1,14 @@
-# 生成式画质增强
+# 视频画质增强极速版
 
 ## 能力描述
-生成式视频增强修复（generative_video_restoration）是基于扩散大模型（Diffusion-based Large Model）的生成式视频修复技术。不仅可以还原被破坏的像素，更借助大规模预训练积累的丰富视觉先验，主动补全细节、理解语义，生成真实、自然、高保真的视频内容。
+集成轻量级超分与智能画质增强能力，采用速度优先算法优化策略，高效兼顾处理效率与画面效果，适配各类时延敏感型业务场景。
 
 ## 执行方式
 
 | 项目 | 说明 |
 |------|------|
 | Domain | `video` |
-| Tool | `enhance-video-generative` |
+| Tool | `enhance-video-fast` |
 | 是否异步 | `是` |
 | 是否支持 local | `否` |
 | 模式说明 | cloud only；可通过 `--cloud` 强制当前调用 |
@@ -18,17 +18,16 @@
 | 参数 | CLI flag | 类型 | 必填 | 默认值 | 说明 |
 |------|----------|------|------|--------|------|
 | video_url | `--video-url` | string | 是 | - | 输入视频。String 类型，支持http://xxx或https://xxx格式 URL |
-| resolution | `--resolution` | string | 否 | 720p | 目标分辨率。支持的取值：720p / 1080p / 2k |
+| resolution | `--resolution` | string | 否 | - | 目标分辨率。支持的取值：240p / 360p / 480p / 540p / 720p / 1080p / 2k / 4k。配置此参数后，不可同时配置resolution_limit字段 |
+| resolution_limit | `--resolution-limit` | integer | 否 | - | 指定输出视频的短边像素值，取值范围为 [128, 2160]。设置后，系统将锁定视频的短边像素值为设定值，并在保持原视频宽高比的前提下，等比缩放至该限制值。配置此参数后，不可同时配置resolution字段 |
 | bitrate_level | `--bitrate-level` | string | 否 | medium | 码率档位。输出视频的目标平均码率。取值：low（低码率）/ medium（中码率，推荐）/ high（高码率）。默认为 medium |
-| fps | `--fps` | number | 否 | - | 目标帧率，单位为 fps。若未指定，输出视频将保持与原始片源一致的帧率。取值范围为 [15, 120]，建议不超过原片的 4 倍 |
-| experimental_version | `--experimental-version` | string | 否 | - | 实验版本，用于内部业务传入特定版本模型，官网文档不提供该字段。可选值，0.2、1.0等。非必填 |
-| generation_weight | `--generation-weight` | number | 否 | - | 生成强度。数值越大表示增强/生成强度越大，数值越小表示越遵循原片。建议最小取值是 0.4。非必填 |
+| fps | `--fps` | number | 否 | - | 目标帧率，单位为 fps。取值范围为 [15, 120]。 |
 | callback_args | `--callback-args` | string | 否 | - | 可选，回调参数 |
 | client_token | `--client-token` | string | 否 | - | 可选，用于幂等，默认幂等，用户可根据需求进行调整 |
 
 ## 调用示例
 ```bash
-mediakit-cli video enhance-video-generative \
+mediakit-cli video enhance-video-fast \
   --video-url https://example.com/video_url \
   --resolution 720p \
   --bitrate-level medium \
@@ -48,5 +47,5 @@ mediakit-cli video enhance-video-generative \
 ## 任务结果查询
 提交成功后会返回 `task_id`，再执行 `mediakit-cli shared query-task --task-id <task_id>` 查询。
 
-- 当前命令：`mediakit-cli video enhance-video-generative`
+- 当前命令：`mediakit-cli video enhance-video-fast`
 - 推荐查询：`mediakit-cli shared query-task --task-id <task_id>`

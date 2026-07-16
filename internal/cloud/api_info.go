@@ -19,6 +19,8 @@ var apiInfoRegistry = map[string]APIInfo{
 	"concat-audio":                   {Method: "POST", Path: "/api/v1/tools/concat-audio"},
 	"trim-audio":                     {Method: "POST", Path: "/api/v1/tools/trim-audio"},
 	"enhance-video":                  {Method: "POST", Path: "/api/v1/tools/enhance-video"},
+	"enhance-video-fast":             {Method: "POST", Path: "/api/v1/tools/enhance-video-fast"},
+	"video-understand-router":        {Method: "POST", Path: "/api/v1/tools/video-understand-router"},
 	"erase-video-subtitle":           {Method: "POST", Path: "/api/v1/tools/erase-video-subtitle"},
 	"video-ocr":                      {Method: "POST", Path: "/api/v1/tools/video-ocr"},
 	"asr-subtitles":                  {Method: "POST", Path: "/api/v1/tools/asr-subtitles"},
