@@ -40,6 +40,8 @@ type Result struct {
 
 var checkResult atomic.Value // *Result
 
+var fetchLatestVersionFn = fetchLatestVersion
+
 // StartAsync wires the non-blocking update notice for normal commands.
 // It only reads the local cache synchronously: a fresh real result is stored
 // for the stdout/stderr notice path. When the cache is missing or stale it
@@ -79,16 +81,28 @@ func RunRefresh() {
 	if running == "" {
 		return
 	}
-	latest, err := fetchLatestVersion(refreshFetchTimeout)
+	home, err := cliconfig.ResolveHomeDir()
 	if err != nil {
+		return
+	}
+	latest, err := fetchLatestVersionFn(refreshFetchTimeout)
+	if err != nil {
+		_ = SaveCache(home, &Cache{
+			Current:   running,
+			CheckedAt: time.Now(),
+			Status:    CacheStatusError,
+			Error:     err.Error(),
+		})
 		return
 	}
 	latest = strings.TrimSpace(latest)
 	if latest == "" {
-		return
-	}
-	home, err := cliconfig.ResolveHomeDir()
-	if err != nil {
+		_ = SaveCache(home, &Cache{
+			Current:   running,
+			CheckedAt: time.Now(),
+			Status:    CacheStatusError,
+			Error:     "empty latest version",
+		})
 		return
 	}
 	_ = SaveCache(home, &Cache{
@@ -96,6 +110,7 @@ func RunRefresh() {
 		Latest:    latest,
 		CheckedAt: time.Now(),
 		HasUpdate: compareVersions(running, latest) < 0,
+		Status:    CacheStatusReady,
 	})
 }
 
@@ -103,7 +118,7 @@ func RunRefresh() {
 // (`version --check`, `update`). It returns a fresh cached result when
 // available, otherwise fetches from the registry within the timeout and
 // persists the cache. Returns nil only when update checks are disabled.
-func CheckNow(timeout time.Duration) *Result {
+func CheckNow(timeout time.Duration, forceRefresh bool) *Result {
 	if shouldSkip() {
 		return nil
 	}
@@ -111,26 +126,47 @@ func CheckNow(timeout time.Duration) *Result {
 	if running == "" {
 		return nil
 	}
-	if home, err := cliconfig.ResolveHomeDir(); err == nil {
+	home, homeErr := cliconfig.ResolveHomeDir()
+	if homeErr == nil && !forceRefresh {
 		if r := loadCachedResult(home, running); r != nil {
 			return r
 		}
 	}
-	latest, err := fetchLatestVersion(timeout)
+	if homeErr == nil {
+		_ = SaveCache(home, &Cache{Current: running, CheckedAt: time.Now(), Status: CacheStatusChecking})
+	}
+	latest, err := fetchLatestVersionFn(timeout)
 	if err != nil {
+		if homeErr == nil {
+			_ = SaveCache(home, &Cache{
+				Current:   running,
+				CheckedAt: time.Now(),
+				Status:    CacheStatusError,
+				Error:     err.Error(),
+			})
+		}
 		return &Result{Current: running, Err: err}
 	}
 	latest = strings.TrimSpace(latest)
 	if latest == "" {
+		if homeErr == nil {
+			_ = SaveCache(home, &Cache{
+				Current:   running,
+				CheckedAt: time.Now(),
+				Status:    CacheStatusError,
+				Error:     "empty latest version",
+			})
+		}
 		return &Result{Current: running, Err: fmt.Errorf("empty latest version")}
 	}
 	hasUpdate := compareVersions(running, latest) < 0
-	if home, herr := cliconfig.ResolveHomeDir(); herr == nil {
+	if homeErr == nil {
 		_ = SaveCache(home, &Cache{
 			Current:   running,
 			Latest:    latest,
 			CheckedAt: time.Now(),
 			HasUpdate: hasUpdate,
+			Status:    CacheStatusReady,
 		})
 	}
 	return &Result{HasUpdate: hasUpdate, Current: running, Latest: latest}
@@ -142,6 +178,9 @@ func CheckNow(timeout time.Duration) *Result {
 func loadCachedResult(home, running string) *Result {
 	cached, _ := LoadCache(home)
 	if cached == nil || !IsCacheFresh(cached, running) {
+		return nil
+	}
+	if effectiveStatus(cached) != CacheStatusReady {
 		return nil
 	}
 	if strings.TrimSpace(cached.Latest) == "" {
@@ -164,7 +203,7 @@ func claimRefresh(home, running string) bool {
 		cached.Current == running && time.Since(cached.CheckedAt) <= CacheTTL {
 		return false
 	}
-	_ = SaveCache(home, &Cache{Current: running, CheckedAt: time.Now()})
+	_ = SaveCache(home, &Cache{Current: running, CheckedAt: time.Now(), Status: CacheStatusChecking})
 	return true
 }
 
@@ -192,6 +231,9 @@ func shouldSkip() bool {
 		return true
 	}
 	if strings.TrimSpace(build.Version) == "dev" {
+		return true
+	}
+	if home, err := cliconfig.ResolveHomeDir(); err == nil && cliconfig.UpdateCheckDisabledByConfig(home) {
 		return true
 	}
 	return false
