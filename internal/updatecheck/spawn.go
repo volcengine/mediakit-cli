@@ -1,3 +1,5 @@
+//go:build !mediakit_no_update
+
 package updatecheck
 
 import (

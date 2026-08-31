@@ -8,6 +8,7 @@ import (
 	"time"
 
 	cliconfig "mediakit-cli/internal/config"
+	"mediakit-cli/internal/surface"
 )
 
 const mediaUploadCommand = "request-media-upload-url"
@@ -32,7 +33,19 @@ func materializeCloudMediaInputs(client *Client, command string, params map[stri
 	if err != nil {
 		return nil, err
 	}
-	materialized, err := materializeCloudValue(client, home, command, "", params, false)
+	var inputSchema map[string]any
+	if capability, ok := surface.Lookup(command); ok {
+		inputSchema = capability.Parameters
+	}
+	materialized, err := materializeCloudValue(
+		client,
+		home,
+		command,
+		"",
+		params,
+		inputSchema,
+		false,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -43,13 +56,32 @@ func materializeCloudMediaInputs(client *Client, command string, params map[stri
 	return next, nil
 }
 
-func materializeCloudValue(client *Client, home string, command string, key string, value any, mediaContext bool) (any, error) {
+func materializeCloudValue(
+	client *Client,
+	home string,
+	command string,
+	key string,
+	value any,
+	schema map[string]any,
+	mediaContext bool,
+) (any, error) {
 	switch typed := value.(type) {
 	case map[string]any:
 		next := make(map[string]any, len(typed))
 		for childKey, childValue := range typed {
-			childMediaContext := mediaContext || isMediaInputField(childKey)
-			materialized, err := materializeCloudValue(client, home, command, childKey, childValue, childMediaContext)
+			childSchema := mediaInputPropertySchema(schema, childKey)
+			childMediaContext := mediaContext ||
+				isMediaInputSchema(childSchema) ||
+				isMediaInputField(childKey)
+			materialized, err := materializeCloudValue(
+				client,
+				home,
+				command,
+				childKey,
+				childValue,
+				childSchema,
+				childMediaContext,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -58,9 +90,21 @@ func materializeCloudValue(client *Client, home string, command string, key stri
 		return next, nil
 	case []any:
 		next := make([]any, len(typed))
-		childMediaContext := mediaContext || isMediaInputField(key)
+		itemSchema := mediaInputItemsSchema(schema)
+		childMediaContext := mediaContext ||
+			isMediaInputSchema(schema) ||
+			isMediaInputSchema(itemSchema) ||
+			isMediaInputField(key)
 		for i, childValue := range typed {
-			materialized, err := materializeCloudValue(client, home, command, key, childValue, childMediaContext)
+			materialized, err := materializeCloudValue(
+				client,
+				home,
+				command,
+				key,
+				childValue,
+				itemSchema,
+				childMediaContext,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -68,7 +112,11 @@ func materializeCloudValue(client *Client, home string, command string, key stri
 		}
 		return next, nil
 	case []string:
-		if !mediaContext && !isMediaInputField(key) {
+		itemSchema := mediaInputItemsSchema(schema)
+		if !mediaContext &&
+			!isMediaInputSchema(schema) &&
+			!isMediaInputSchema(itemSchema) &&
+			!isMediaInputField(key) {
 			return typed, nil
 		}
 		next := make([]string, len(typed))
@@ -81,13 +129,34 @@ func materializeCloudValue(client *Client, home string, command string, key stri
 		}
 		return next, nil
 	case string:
-		if !mediaContext && !isMediaInputField(key) {
+		if !mediaContext &&
+			!isMediaInputSchema(schema) &&
+			!isMediaInputField(key) {
 			return typed, nil
 		}
 		return materializeCloudMediaString(client, home, command, typed)
 	default:
 		return value, nil
 	}
+}
+
+func mediaInputPropertySchema(
+	schema map[string]any,
+	name string,
+) map[string]any {
+	properties, _ := schema["properties"].(map[string]any)
+	child, _ := properties[name].(map[string]any)
+	return child
+}
+
+func mediaInputItemsSchema(schema map[string]any) map[string]any {
+	items, _ := schema["items"].(map[string]any)
+	return items
+}
+
+func isMediaInputSchema(schema map[string]any) bool {
+	format := strings.ToLower(strings.TrimSpace(fmt.Sprint(schema["format"])))
+	return strings.HasPrefix(format, "media-")
 }
 
 func materializeCloudMediaString(client *Client, home string, command string, value string) (string, error) {
@@ -105,7 +174,8 @@ func materializeCloudMediaString(client *Client, home string, command string, va
 	}
 
 	now := time.Now().UTC()
-	if fileID, err := lookupUploadCache(home, identity, now); err != nil {
+	authKey := computeUploadCacheAuth(client.Endpoint, client.Auth.UploadCacheScopeIdentity())
+	if fileID, err := lookupUploadCache(home, authKey, identity, now); err != nil {
 		return "", err
 	} else if fileID != "" {
 		return fileID, nil
@@ -115,7 +185,7 @@ func materializeCloudMediaString(client *Client, home string, command string, va
 	if err != nil {
 		return "", err
 	}
-	return storeUploadCache(home, identity, fileID, now)
+	return storeUploadCache(home, authKey, identity, fileID, now)
 }
 
 func resolveLocalMediaIdentity(value string) (fileIdentity, bool, error) {
@@ -159,7 +229,9 @@ func isRemoteOrMediaKitURL(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.HasPrefix(lower, "http://") ||
 		strings.HasPrefix(lower, "https://") ||
-		strings.HasPrefix(lower, "mediakit://")
+		strings.HasPrefix(lower, "mediakit://") ||
+		strings.HasPrefix(lower, "vod://") ||
+		strings.HasPrefix(lower, "tos://")
 }
 
 func looksLikeLocalPath(value string) bool {

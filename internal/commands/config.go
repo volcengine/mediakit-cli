@@ -1,13 +1,13 @@
+//go:build !mediakit_cloud_only
+
 package commands
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"mediakit-cli/internal/cloud"
 	cliconfig "mediakit-cli/internal/config"
 )
 
@@ -15,11 +15,14 @@ func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage mediakit-cli configuration",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
 
 	cmd.AddCommand(newConfigSetCmd())
 	cmd.AddCommand(newConfigShowCmd())
-	cmd.AddCommand(newConfigHeadersCmd())
 	return cmd
 }
 
@@ -119,9 +122,9 @@ func newConfigSetUpdateCheckCmd() *cobra.Command {
 
 func parseUpdateCheckToggle(value string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "on", "true", "enable", "enabled", "1":
+	case "on":
 		return false, nil
-	case "off", "false", "disable", "disabled", "0":
+	case "off":
 		return true, nil
 	default:
 		return false, fmt.Errorf("invalid value %q: expected on or off", value)
@@ -154,72 +157,22 @@ func newConfigShowCmd() *cobra.Command {
 			}
 			_, err := fmt.Fprintf(
 				cmd.OutOrStdout(),
-				"当前配置\n- mode: %s\n- api_key: %s (%s)\n- endpoint: %s (%s)\n- output_path: %s (%s)\n- credential_store: %s\n- update_check: %s\n- config_file: %s\n- env_cache: %s\n- last_env_check: %s\n",
+				"当前配置\n- mode: %s\n- endpoint: %s (%s)\n- runtime: %s\n- output_path: %s (%s)\n- update_check: %s\n- config_file: %s\n- cache_directory: %s\n- env_cache: %s\n- last_env_check: %s\n",
 				resolved.Mode,
-				displaySecret(resolved.APIKey),
-				resolved.APIKeySource,
 				resolved.Endpoint,
 				resolved.EndpointSource,
+				displayValueOrFallback(resolved.Runtime, "auto-detect"),
 				resolved.OutputPath,
 				resolved.OutputPathSource,
-				resolved.CredentialStore,
 				updateCheckStateLabel(!resolved.DisableUpdateCheck),
 				resolved.ConfigPath,
+				resolved.CacheDir,
 				resolved.EnvCachePath,
 				displayValueOrFallback(cache.CheckedAt, "never"),
 			)
 			return err
 		},
 	}
-}
-
-func newConfigHeadersCmd() *cobra.Command {
-	var asJSON bool
-	cmd := &cobra.Command{
-		Use:   "headers",
-		Short: "Show locally resolved cloud request headers",
-		Long:  "Show locally resolved non-sensitive cloud request headers. This command does not send a request and never prints Authorization.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			home, resolveErr := cliconfig.ResolveHomeDir()
-			if resolveErr != nil {
-				return resolveErr
-			}
-			resolved, configErr := cliconfig.ResolveConfig(home)
-			if configErr != nil {
-				return configErr
-			}
-			headers := cloud.PreviewHeaders(resolved.Surface, resolved.Runtime)
-			if asJSON {
-				encoder := json.NewEncoder(cmd.OutOrStdout())
-				encoder.SetEscapeHTML(false)
-				encoder.SetIndent("", "  ")
-				return encoder.Encode(map[string]any{
-					"headers":     headers,
-					"config_file": resolved.ConfigPath,
-				})
-			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "本地请求 Header（未发送请求，不包含 Authorization）\n"); err != nil {
-				return err
-			}
-			for _, key := range []string{"Accept", "Content-Type", "x-surface", "X-Amk-Cli-Runtime", "X-Amk-Task-Source", "X-Amk-Cli-Version"} {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "- %s: %s\n", key, headers[key]); err != nil {
-					return err
-				}
-			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "配置文件：%s\n", resolved.ConfigPath)
-			return err
-		},
-	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output structured JSON")
-	return cmd
-}
-
-func displaySecret(value string) string {
-	if value == "" {
-		return "<not configured>"
-	}
-	return cliconfig.MaskSecret(value)
 }
 
 func displayValueOrFallback(value string, fallback string) string {

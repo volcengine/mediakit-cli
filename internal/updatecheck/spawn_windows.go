@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && !mediakit_no_update
 
 package updatecheck
 

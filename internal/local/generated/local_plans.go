@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package generated
 
 import (
@@ -14,11 +16,6 @@ import (
 
 	"mediakit-cli/internal/local/core"
 )
-
-type LocalWarning struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
-}
 
 type LocalInputRef struct {
 	Original  string `json:"original"`
@@ -107,25 +104,15 @@ func unsupportedIfPresent(params map[string]any, key string) error {
 	return fmt.Errorf("%s 当前不支持本地执行，请使用 cloud 模式", key)
 }
 
-func warnIfLocalNoop(params map[string]any, key string, warnings *[]LocalWarning) {
-	if _, ok := params[key]; !ok {
-		return
-	}
-	*warnings = append(*warnings, LocalWarning{
-		Field:   key,
-		Message: key + " 仅用于 cloud 模式，本地执行会忽略",
-	})
+func videoResponse(command string, output string, inputs []LocalInputRef, extra map[string]any) map[string]any {
+	return localMediaResponse(command, "video", output, inputs, extra)
 }
 
-func videoResponse(command string, output string, inputs []LocalInputRef, warnings []LocalWarning, extra map[string]any) map[string]any {
-	return localMediaResponse(command, "video", output, inputs, warnings, extra)
+func audioResponse(command string, output string, inputs []LocalInputRef, extra map[string]any) map[string]any {
+	return localMediaResponse(command, "audio", output, inputs, extra)
 }
 
-func audioResponse(command string, output string, inputs []LocalInputRef, warnings []LocalWarning, extra map[string]any) map[string]any {
-	return localMediaResponse(command, "audio", output, inputs, warnings, extra)
-}
-
-func localMediaResponse(command string, mediaType string, output string, inputs []LocalInputRef, warnings []LocalWarning, extra map[string]any) map[string]any {
+func localMediaResponse(command string, mediaType string, output string, inputs []LocalInputRef, extra map[string]any) map[string]any {
 	result := map[string]any{}
 	switch mediaType {
 	case "audio":
@@ -140,9 +127,6 @@ func buildConcatVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	if err := unsupportedIfPresent(ctx.Params, "transitions"); err != nil {
 		return nil, err
 	}
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
 
 	urls, err := requiredStringListParam(ctx.Params, "video_urls")
 	if err != nil {
@@ -167,17 +151,13 @@ func buildConcatVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	args := []string{"-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", fileList, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", out}
 	return &FFmpegPlan{
 		Args: args,
-		Result: videoResponse("concat-video", out, inputs, warnings, map[string]any{
+		Result: videoResponse("concat-video", out, inputs, map[string]any{
 			"input_count": len(inputs),
 		}),
 	}, nil
 }
 
 func buildConcatAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	urls, err := requiredStringListParam(ctx.Params, "audio_urls")
 	if err != nil {
 		return nil, err
@@ -201,17 +181,13 @@ func buildConcatAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	args := []string{"-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", fileList, "-vn", "-c:a", "aac", "-b:a", "128k", out}
 	return &FFmpegPlan{
 		Args: args,
-		Result: audioResponse("concat-audio", out, inputs, warnings, map[string]any{
+		Result: audioResponse("concat-audio", out, inputs, map[string]any{
 			"input_count": len(inputs),
 		}),
 	}, nil
 }
 
 func buildTrimVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -244,14 +220,10 @@ func buildTrimVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		args = append(args, "-t", formatFloat(duration))
 	}
 	args = append(args, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", out)
-	return &FFmpegPlan{Args: args, Result: videoResponse("trim-video", out, []LocalInputRef{input}, warnings, map[string]any{"start_time": start, "end_time": end})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("trim-video", out, []LocalInputRef{input}, map[string]any{"start_time": start, "end_time": end})}, nil
 }
 
 func buildTrimAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
 	if err != nil {
 		return nil, err
@@ -284,14 +256,10 @@ func buildTrimAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		args = append(args, "-t", formatFloat(duration))
 	}
 	args = append(args, "-vn", "-c:a", "aac", "-b:a", "128k", out)
-	return &FFmpegPlan{Args: args, Result: audioResponse("trim-audio", out, []LocalInputRef{input}, warnings, map[string]any{"start_time": start, "end_time": end})}, nil
+	return &FFmpegPlan{Args: args, Result: audioResponse("trim-audio", out, []LocalInputRef{input}, map[string]any{"start_time": start, "end_time": end})}, nil
 }
 
 func buildMuxAudioVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -313,14 +281,10 @@ func buildMuxAudioVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		return nil, err
 	}
 	args := []string{"-y", "-hide_banner", "-i", video.LocalPath, "-i", audio.LocalPath, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", out}
-	return &FFmpegPlan{Args: args, Result: videoResponse("mux-audio-video", out, []LocalInputRef{video, audio}, warnings, map[string]any{})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("mux-audio-video", out, []LocalInputRef{video, audio}, map[string]any{})}, nil
 }
 
 func buildFadeVideoAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -358,7 +322,7 @@ func buildFadeVideoAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	if fadeIn == 0 && fadeOut == 0 {
 		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out}
-		return &FFmpegPlan{Args: args, Result: videoResponse("fade-video-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+		return &FFmpegPlan{Args: args, Result: videoResponse("fade-video-audio", out, []LocalInputRef{input}, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
 	}
 	duration, err := mediaDuration(input.LocalPath)
 	if err != nil {
@@ -366,14 +330,10 @@ func buildFadeVideoAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	filter := audioFadeFilter(fadeIn, fadeOut, duration)
 	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]" + filter + "[outa]", "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", out}
-	return &FFmpegPlan{Args: args, Result: videoResponse("fade-video-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("fade-video-audio", out, []LocalInputRef{input}, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
 }
 
 func buildAdjustVideoVolumePlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -401,17 +361,13 @@ func buildAdjustVideoVolumePlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	if volume == 1 {
 		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", out}
-		return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-volume", out, []LocalInputRef{input}, warnings, map[string]any{"volume": volume})}, nil
+		return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-volume", out, []LocalInputRef{input}, map[string]any{"volume": volume})}, nil
 	}
 	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]volume=" + formatFloat(volume) + "[outa]", "-map", "0:v:0", "-map", "[outa]", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", out}
-	return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-volume", out, []LocalInputRef{input}, warnings, map[string]any{"volume": volume})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-volume", out, []LocalInputRef{input}, map[string]any{"volume": volume})}, nil
 }
 
 func buildFadeAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
 	if err != nil {
 		return nil, err
@@ -446,7 +402,7 @@ func buildFadeAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	if fadeIn == 0 && fadeOut == 0 {
 		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-vn", "-c:a", "libmp3lame", "-b:a", "128k", out}
-		return &FFmpegPlan{Args: args, Result: audioResponse("fade-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+		return &FFmpegPlan{Args: args, Result: audioResponse("fade-audio", out, []LocalInputRef{input}, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
 	}
 	duration, err := mediaDuration(input.LocalPath)
 	if err != nil {
@@ -454,14 +410,10 @@ func buildFadeAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	filter := audioFadeFilter(fadeIn, fadeOut, duration)
 	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]" + filter + "[outa]", "-map", "[outa]", "-vn", "-c:a", "libmp3lame", "-b:a", "128k", out}
-	return &FFmpegPlan{Args: args, Result: audioResponse("fade-audio", out, []LocalInputRef{input}, warnings, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
+	return &FFmpegPlan{Args: args, Result: audioResponse("fade-audio", out, []LocalInputRef{input}, map[string]any{"fade_in_duration": fadeIn, "fade_out_duration": fadeOut})}, nil
 }
 
 func buildAdjustAudioSpeedPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
 	if err != nil {
 		return nil, err
@@ -486,17 +438,13 @@ func buildAdjustAudioSpeedPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	if speed == 1 {
 		args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-vn", "-c:a", "aac", "-b:a", "128k", out}
-		return &FFmpegPlan{Args: args, Result: audioResponse("adjust-audio-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+		return &FFmpegPlan{Args: args, Result: audioResponse("adjust-audio-speed", out, []LocalInputRef{input}, map[string]any{"speed": speed})}, nil
 	}
 	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:a]" + atempoChain(speed) + "[outa]", "-map", "[outa]", "-vn", "-c:a", "aac", "-b:a", "128k", out}
-	return &FFmpegPlan{Args: args, Result: audioResponse("adjust-audio-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+	return &FFmpegPlan{Args: args, Result: audioResponse("adjust-audio-speed", out, []LocalInputRef{input}, map[string]any{"speed": speed})}, nil
 }
 
 func buildMixAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	urls, err := requiredStringListParam(ctx.Params, "audio_urls")
 	if err != nil {
 		return nil, err
@@ -524,14 +472,10 @@ func buildMixAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	filter := strings.Join(filterInputs, "") + fmt.Sprintf("amix=inputs=%d:duration=longest:dropout_transition=0[outa]", len(inputs))
 	args = append(args, "-filter_complex", filter, "-map", "[outa]", "-vn", "-c:a", "libmp3lame", "-b:a", "128k", out)
-	return &FFmpegPlan{Args: args, Result: audioResponse("mix-audio", out, inputs, warnings, map[string]any{"input_count": len(inputs)})}, nil
+	return &FFmpegPlan{Args: args, Result: audioResponse("mix-audio", out, inputs, map[string]any{"input_count": len(inputs)})}, nil
 }
 
 func buildProbeAudioMetadataResult(ctx *core.ExecContext) (map[string]any, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	audioURL, err := requiredStringParam(ctx.Params, "audio_url")
 	if err != nil {
 		return nil, err
@@ -570,10 +514,6 @@ func buildProbeAudioMetadataResult(ctx *core.ExecContext) (map[string]any, error
 }
 
 func buildProbeVideoMetadataResult(ctx *core.ExecContext) (map[string]any, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -630,10 +570,6 @@ func buildProbeVideoMetadataResult(ctx *core.ExecContext) (map[string]any, error
 }
 
 func buildMatteGreenscreenVideoResult(ctx *core.ExecContext) (map[string]any, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -642,7 +578,7 @@ func buildMatteGreenscreenVideoResult(ctx *core.ExecContext) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	format := strings.ToUpper(valueOrDefault(ctx.Params, "format", "WEBM"))
+	format := strings.ToUpper(valueOrDefault(ctx.Params, "format", "MOV"))
 	if format != "MOV" {
 		return nil, fmt.Errorf("matte-greenscreen-video 本地模式仅支持 --format MOV；WEBM 透明输出请使用 cloud 模式")
 	}
@@ -673,10 +609,6 @@ func buildMatteGreenscreenVideoResult(ctx *core.ExecContext) (map[string]any, er
 }
 
 func buildExtractAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -695,14 +627,10 @@ func buildExtractAudioPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 	}
 	format := strings.TrimPrefix(ext, ".")
 	args := []string{"-y", "-hide_banner", "-i", input.LocalPath, "-map", "0:a:0", "-c:a", codec, out}
-	return &FFmpegPlan{Args: args, Result: audioResponse("extract-audio", out, []LocalInputRef{input}, warnings, map[string]any{"format": format})}, nil
+	return &FFmpegPlan{Args: args, Result: audioResponse("extract-audio", out, []LocalInputRef{input}, map[string]any{"format": format})}, nil
 }
 
 func buildFlipVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -737,14 +665,10 @@ func buildFlipVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + strings.Join(filters, ",") + "[outv]", "-map", "[outv]", "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k"},
 		append(h264OutputArgs("1200k"), out)...,
 	)
-	return &FFmpegPlan{Args: args, Result: videoResponse("flip-video", out, []LocalInputRef{input}, warnings, map[string]any{"is_flip_vertical": vertical, "is_flip_horizontal": horizontal})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("flip-video", out, []LocalInputRef{input}, map[string]any{"is_flip_vertical": vertical, "is_flip_horizontal": horizontal})}, nil
 }
 
 func buildAdjustVideoSpeedPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -775,13 +699,13 @@ func buildAdjustVideoSpeedPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 			[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + videoExpr + "[outv];[0:a]" + audioExpr + "[outa]", "-map", "[outv]", "-map", "[outa]", "-c:a", "aac", "-b:a", "128k"},
 			append(h264OutputArgs("1200k"), out)...,
 		)
-		return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+		return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-speed", out, []LocalInputRef{input}, map[string]any{"speed": speed})}, nil
 	}
 	args := append(
 		[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-filter_complex", "[0:v]" + videoExpr + "[outv]", "-map", "[outv]"},
 		append(h264OutputArgs("1200k"), "-an", out)...,
 	)
-	return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-speed", out, []LocalInputRef{input}, warnings, map[string]any{"speed": speed})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("adjust-video-speed", out, []LocalInputRef{input}, map[string]any{"speed": speed})}, nil
 }
 
 func hasAudioStream(filePath string) bool {
@@ -951,10 +875,6 @@ func atempoChain(speed float64) string {
 }
 
 func buildAddSubtitleToVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -990,7 +910,7 @@ func buildAddSubtitleToVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		[]string{"-y", "-hide_banner", "-i", input.LocalPath, "-vf", "subtitles=" + escapeFilterPath(subtitleInput.LocalPath) + ":force_style='" + style + "'", "-map", "0:v:0", "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k"},
 		append(h264OutputArgs("1300k"), out)...,
 	)
-	return &FFmpegPlan{Args: args, Result: videoResponse("add-subtitle-to-video", out, []LocalInputRef{input, subtitleInput}, warnings, map[string]any{"subtitle_source": subtitleSource, "subtitle_pos_preset": valueOrDefault(ctx.Params, "subtitle_pos_preset", "bottom_center")})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("add-subtitle-to-video", out, []LocalInputRef{input, subtitleInput}, map[string]any{"subtitle_source": subtitleSource, "subtitle_pos_preset": valueOrDefault(ctx.Params, "subtitle_pos_preset", "bottom_center")})}, nil
 }
 
 func writeSubtitleObjectsAsSRT(ctx *core.ExecContext) (string, error) {
@@ -1024,10 +944,6 @@ func writeSubtitleObjectsAsSRT(ctx *core.ExecContext) (string, error) {
 }
 
 func buildAddImageToVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
-	warnings := []LocalWarning{}
-	warnIfLocalNoop(ctx.Params, "callback_args", &warnings)
-	warnIfLocalNoop(ctx.Params, "client_token", &warnings)
-
 	videoURL, err := requiredStringParam(ctx.Params, "video_url")
 	if err != nil {
 		return nil, err
@@ -1063,7 +979,7 @@ func buildAddImageToVideoPlan(ctx *core.ExecContext) (*FFmpegPlan, error) {
 		[]string{"-y", "-hide_banner", "-i", video.LocalPath, "-i", image.LocalPath, "-filter_complex", filterComplex, "-map", "[outv]", "-map", "0:a:0?", "-c:a", "aac", "-b:a", "128k"},
 		append(h264OutputArgs("1300k"), out)...,
 	)
-	return &FFmpegPlan{Args: args, Result: videoResponse("add-image-to-video", out, []LocalInputRef{video, image}, warnings, map[string]any{"overlay_start_time": ctx.Params["start_time"], "overlay_end_time": ctx.Params["end_time"]})}, nil
+	return &FFmpegPlan{Args: args, Result: videoResponse("add-image-to-video", out, []LocalInputRef{video, image}, map[string]any{"overlay_start_time": ctx.Params["start_time"], "overlay_end_time": ctx.Params["end_time"]})}, nil
 }
 
 func valueOrDefault(params map[string]any, key string, defaultValue string) string {
@@ -1125,8 +1041,6 @@ func fontNameFor(fontType string) string {
 		return "Source Han Sans"
 	case "pm_zhengdao":
 		return "PangMenZhengDao"
-	case "ali_puhui":
-		return "Alibaba PuHuiTi"
 	case "zhanku_kuaile":
 		return "ZhanKu KuaiLe"
 	default:

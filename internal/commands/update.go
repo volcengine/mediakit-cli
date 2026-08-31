@@ -1,3 +1,5 @@
+//go:build !mediakit_no_update
+
 package commands
 
 import (
@@ -110,9 +112,9 @@ func newUpdateCmd() *cobra.Command {
 			return writeUpdatePayload(cmd, payload)
 		},
 	}
-	cmd.Flags().BoolVar(&checkOnly, "check", false, "Only check for updates; do not install")
-	cmd.Flags().BoolVar(&force, "force", false, "Force reinstall skills from the current npm package even when CLI is already up to date")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "Output structured JSON")
+	strictBoolVar(cmd.Flags(), &checkOnly, "check", false, "Only check for updates; do not install")
+	strictBoolVar(cmd.Flags(), &force, "force", false, "Force reinstall skills from the current npm package even when CLI is already up to date")
+	strictBoolVar(cmd.Flags(), &asJSON, "json", false, "Output structured JSON")
 	return cmd
 }
 

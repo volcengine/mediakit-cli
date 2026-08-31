@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package local
 
 import (
@@ -15,8 +17,8 @@ import (
 	"mediakit-cli/internal/cliexit"
 	cliconfig "mediakit-cli/internal/config"
 	"mediakit-cli/internal/local/core"
+	"mediakit-cli/internal/notice"
 	"mediakit-cli/internal/output"
-	"mediakit-cli/internal/updatecheck"
 )
 
 // Executor coordinates local capability execution in later stages.
@@ -115,7 +117,7 @@ func Execute(cmd *cobra.Command, command string, params map[string]any) error {
 
 func writeJSON(output io.Writer, value any) error {
 	if m, ok := value.(map[string]any); ok {
-		updatecheck.InjectNotice(m)
+		notice.Inject(m)
 	}
 	encoder := json.NewEncoder(output)
 	encoder.SetEscapeHTML(false)

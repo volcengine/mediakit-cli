@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,11 +69,24 @@ func newAPIError(statusCode int, payloadBytes []byte) error {
 }
 
 func errorResponse(err error, taskID string, requestID string) map[string]any {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.Payload != nil && isFailureEnvelope(apiErr.Payload) {
+			return mergeFailureIDs(
+				businessFailureResponse(apiErr.Payload),
+				taskID,
+				requestID,
+			)
+		}
+	}
+
 	output := map[string]any{
 		"success": false,
 	}
 
-	if apiErr, ok := err.(*APIError); ok {
+	var taskType string
+
+	if apiErr != nil {
 		if apiErr.Payload != nil {
 			output["error"] = apiErr.Payload
 		} else {
@@ -84,6 +98,9 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 		if taskID == "" {
 			taskID = extractTaskID(apiErr.Payload)
 		}
+		if taskType == "" {
+			taskType = extractTaskType(apiErr.Payload)
+		}
 	} else if err != nil {
 		output["error"] = err.Error()
 	}
@@ -94,10 +111,31 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 	if taskID != "" {
 		output["task_id"] = taskID
 	}
+	if taskType != "" {
+		output["task_type"] = taskType
+	}
 	if requestID != "" {
 		output["request_id"] = requestID
 	}
 	return output
+}
+
+// isFailureEnvelope 识别已是业务失败 envelope 的响应体：
+// 同时带有 success=false 与 error 字段。此类 payload 应透传，
+// 不能再整包塞进 error，否则会出现 error.error 嵌套。
+func isFailureEnvelope(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	if _, ok := payload["error"]; !ok {
+		return false
+	}
+	value, ok := payload["success"]
+	if !ok {
+		return false
+	}
+	success, ok := value.(bool)
+	return ok && !success
 }
 
 // isBusinessFailure 检测业务级失败：HTTP 2xx 但响应体中 success=false。
@@ -134,6 +172,20 @@ func businessFailureResponse(payload map[string]any) map[string]any {
 	return output
 }
 
+func mergeFailureIDs(output map[string]any, taskID string, requestID string) map[string]any {
+	if taskID != "" {
+		if existing := extractTaskID(output); existing == "" {
+			output["task_id"] = taskID
+		}
+	}
+	if requestID != "" {
+		if existing := extractRequestID(output); existing == "" {
+			output["request_id"] = requestID
+		}
+	}
+	return output
+}
+
 func extractErrorMessage(payload map[string]any) string {
 	if len(payload) == 0 {
 		return ""
@@ -165,6 +217,10 @@ func extractTaskID(payload map[string]any) string {
 
 func extractRequestID(payload map[string]any) string {
 	return extractStringField(payload, "request_id")
+}
+
+func extractTaskType(payload map[string]any) string {
+	return extractStringField(payload, "task_type")
 }
 
 func extractStringField(payload map[string]any, key string) string {
