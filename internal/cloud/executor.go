@@ -10,40 +10,45 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mediakit-cli/internal/auth"
 	"mediakit-cli/internal/cliexit"
-	"mediakit-cli/internal/updatecheck"
+	"mediakit-cli/internal/notice"
+	"mediakit-cli/internal/surface"
 )
 
 // Executor is the unified cloud execution entry for generated capability handlers.
 type Executor struct{}
 
 const (
-	queryTaskCommand     = "query-task"
-	queryTaskIDParam     = "task_id"
-	pollIntervalParam    = "poll_interval_seconds"
-	maxPollAttemptsParam = "max_poll_attempts"
-	pollCompleteParam    = "poll_complete"
+	queryTaskCommand        = "query-task"
+	queryTaskIDParam        = "task_id"
+	pollIntervalParam       = "poll_interval_seconds"
+	maxPollAttemptsParam    = "max_poll_attempts"
+	pollCompleteParam       = "poll_complete"
+	maxPollTimeoutParam     = "max_poll_timeout_seconds"
 )
 
 type queryTaskPollOptions struct {
-	PollInterval time.Duration
-	MaxAttempts  int
-	PollComplete bool
+	PollInterval   time.Duration
+	MaxAttempts    int
+	PollComplete   bool
+	MaxPollTimeout time.Duration
 }
 
-func Execute(cmd *cobra.Command, command string, params map[string]any, apiKey string, endpoint string, surface string, runtime string) error {
-	if strings.TrimSpace(apiKey) == "" {
-		return writeJSON(cmd.OutOrStdout(), errorResponse(fmt.Errorf("cloud 执行需要配置 MEDIAKIT_API_KEY"), "", ""))
-	}
+type queryTaskPoller interface {
+	Call(apiName string, args map[string]any) (map[string]any, error)
+}
 
+func Execute(cmd *cobra.Command, command string, params map[string]any, authContext auth.Context, endpoint string, runtime string) error {
 	normalizedCommand := normalizeCommand(command)
 	normalizedParams := normalizeParams(params)
+	applySeparateVoiceOutputFormatFallback(normalizedCommand, normalizedParams)
 	pollOptions, requestParams, err := splitQueryTaskOptions(normalizedCommand, normalizedParams)
 	if err != nil {
 		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
 	}
 
-	client := NewClient(apiKey, endpoint, surface, runtime)
+	client := NewClient(authContext, endpoint, runtime)
 	requestParams, err = materializeCloudMediaInputs(client, normalizedCommand, requestParams)
 	if err != nil {
 		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
@@ -58,6 +63,19 @@ func Execute(cmd *cobra.Command, command string, params map[string]any, apiKey s
 		if err != nil {
 			return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(response), extractRequestID(response)))
 		}
+	}
+	if normalizedCommand != queryTaskCommand &&
+		!isSyncCommand(normalizedCommand) &&
+		!isBusinessFailure(response) &&
+		extractTaskID(response) == "" {
+		return writeJSON(
+			cmd.OutOrStdout(),
+			errorResponse(
+				fmt.Errorf("异步任务提交成功响应缺少 task_id"),
+				"",
+				extractRequestID(response),
+			),
+		)
 	}
 
 	return writeJSON(cmd.OutOrStdout(), formatCommandResponse(normalizedCommand, response))
@@ -79,6 +97,16 @@ func normalizeParams(params map[string]any) map[string]any {
 		normalized[strings.ReplaceAll(strings.TrimSpace(key), "-", "_")] = value
 	}
 	return normalized
+}
+
+func applySeparateVoiceOutputFormatFallback(command string, params map[string]any) {
+	if command != "separate-voice" {
+		return
+	}
+	value, ok := params["output_format"]
+	if !ok || strings.TrimSpace(fmt.Sprint(value)) == "" || fmt.Sprint(value) == "<nil>" {
+		params["output_format"] = "mp3"
+	}
 }
 
 func splitQueryTaskOptions(command string, params map[string]any) (queryTaskPollOptions, map[string]any, error) {
@@ -124,10 +152,24 @@ func splitQueryTaskOptions(command string, params map[string]any) (queryTaskPoll
 		delete(requestParams, pollCompleteParam)
 	}
 
+	if value, ok := requestParams[maxPollTimeoutParam]; ok {
+		seconds, err := parseFloat64(value)
+		if err != nil {
+			return queryTaskPollOptions{}, nil, fmt.Errorf("%s 必须是数字", maxPollTimeoutParam)
+		}
+		if seconds < 0 {
+			return queryTaskPollOptions{}, nil, fmt.Errorf("%s 不能小于 0", maxPollTimeoutParam)
+		}
+		if seconds > 0 {
+			options.MaxPollTimeout = time.Duration(seconds * float64(time.Second))
+		}
+		delete(requestParams, maxPollTimeoutParam)
+	}
+
 	return options, requestParams, nil
 }
 
-func maybePollQueryTask(client *Client, requestParams map[string]any, response map[string]any, options queryTaskPollOptions) (map[string]any, error) {
+func maybePollQueryTask(client queryTaskPoller, requestParams map[string]any, response map[string]any, options queryTaskPollOptions) (map[string]any, error) {
 	if isTerminalTaskStatus(response) {
 		return response, nil
 	}
@@ -140,9 +182,18 @@ func maybePollQueryTask(client *Client, requestParams map[string]any, response m
 		return nil, fmt.Errorf("%s 轮询需要 %s", queryTaskCommand, queryTaskIDParam)
 	}
 
+	pollStart := time.Now()
+	deadline, hasDeadline := options.pollDeadline(pollStart)
+
 	if options.PollComplete {
 		for {
+			if pollDeadlineReached(deadline, hasDeadline) {
+				return response, nil
+			}
 			time.Sleep(options.PollInterval)
+			if pollDeadlineReached(deadline, hasDeadline) {
+				return response, nil
+			}
 			next, err := client.Call(queryTaskCommand, requestParams)
 			if err != nil {
 				return nil, fmt.Errorf("%s 轮询失败: %w", queryTaskCommand, err)
@@ -154,8 +205,15 @@ func maybePollQueryTask(client *Client, requestParams map[string]any, response m
 		}
 	}
 
-	for attempts := 0; attempts < options.MaxAttempts; attempts++ {
+	maxAttempts := cappedMaxPollAttempts(options)
+	for attempts := 0; attempts < maxAttempts; attempts++ {
+		if pollDeadlineReached(deadline, hasDeadline) {
+			break
+		}
 		time.Sleep(options.PollInterval)
+		if pollDeadlineReached(deadline, hasDeadline) {
+			break
+		}
 		next, err := client.Call(queryTaskCommand, requestParams)
 		if err != nil {
 			return nil, fmt.Errorf("%s 轮询失败: %w", queryTaskCommand, err)
@@ -169,12 +227,37 @@ func maybePollQueryTask(client *Client, requestParams map[string]any, response m
 	return response, nil
 }
 
-func formatCommandResponse(command string, response map[string]any) map[string]any {
-	if isBusinessFailure(response) {
-		return businessFailureResponse(response)
+func (o queryTaskPollOptions) pollDeadline(start time.Time) (time.Time, bool) {
+	if o.MaxPollTimeout <= 0 {
+		return time.Time{}, false
 	}
+	return start.Add(o.MaxPollTimeout), true
+}
+
+func pollDeadlineReached(deadline time.Time, enabled bool) bool {
+	return enabled && !time.Now().Before(deadline)
+}
+
+func cappedMaxPollAttempts(options queryTaskPollOptions) int {
+	if options.MaxAttempts <= 0 {
+		return 0
+	}
+	if options.MaxPollTimeout <= 0 || options.PollInterval <= 0 {
+		return options.MaxAttempts
+	}
+	maxByTimeout := int(options.MaxPollTimeout / options.PollInterval)
+	if maxByTimeout < options.MaxAttempts {
+		return maxByTimeout
+	}
+	return options.MaxAttempts
+}
+
+func formatCommandResponse(command string, response map[string]any) map[string]any {
 	if command == queryTaskCommand {
 		return queryTaskResponse(response)
+	}
+	if isBusinessFailure(response) {
+		return businessFailureResponse(response)
 	}
 	if isSyncCommand(command) {
 		return syncToolResponse(response)
@@ -183,11 +266,11 @@ func formatCommandResponse(command string, response map[string]any) map[string]a
 }
 
 func isSyncCommand(command string) bool {
-	api, ok := apiInfoRegistry[command]
+	capability, ok := surface.Lookup(command)
 	if !ok {
 		return false
 	}
-	return strings.HasPrefix(api.Path, "/api/v1/tools-sync/")
+	return !capability.Async
 }
 
 func syncToolResponse(result map[string]any) map[string]any {
@@ -204,6 +287,9 @@ func syncToolResponse(result map[string]any) map[string]any {
 	if taskID := strings.TrimSpace(fmt.Sprint(result["task_id"])); taskID != "" && taskID != "<nil>" {
 		output["task_id"] = taskID
 	}
+	if taskType := extractTaskType(result); taskType != "" {
+		output["task_type"] = taskType
+	}
 	if requestID := strings.TrimSpace(fmt.Sprint(result["request_id"])); requestID != "" && requestID != "<nil>" {
 		output["request_id"] = requestID
 	}
@@ -211,25 +297,29 @@ func syncToolResponse(result map[string]any) map[string]any {
 		output["status"] = status
 	}
 	taskResult, ok := result["result"].(map[string]any)
-	if !ok {
-		return output
+	if ok {
+		for key, value := range taskResult {
+			output[key] = value
+		}
 	}
-	for key, value := range taskResult {
-		output[key] = value
-	}
+	// usage 只允许来自成功的同步 Cloud 响应 envelope；拍平 result 时先移除
+	// 同名业务字段，避免 result.usage 冒充共享 Cloud 响应。
+	delete(output, "usage")
+	applyCloudUsage(output, result)
 	return output
 }
 
 func asyncTaskResponse(result map[string]any) map[string]any {
-	output := map[string]any{
-		"task_id": "",
-	}
+	output := map[string]any{}
 	// 透传后端 success 字段：发起任务成功返回 true，失败返回 false（详细 error 参考 error 字段）。
 	if success, ok := result["success"].(bool); ok {
 		output["success"] = success
 	}
-	if taskID, ok := result["task_id"]; ok {
-		output["task_id"] = strings.TrimSpace(fmt.Sprint(taskID))
+	if taskID := extractTaskID(result); taskID != "" {
+		output["task_id"] = taskID
+	}
+	if taskType := extractTaskType(result); taskType != "" {
+		output["task_type"] = taskType
 	}
 	if requestID := strings.TrimSpace(fmt.Sprint(result["request_id"])); requestID != "" && requestID != "<nil>" {
 		output["request_id"] = requestID
@@ -245,6 +335,9 @@ func queryTaskResponse(result map[string]any) map[string]any {
 	output := map[string]any{
 		"task_id": strings.TrimSpace(fmt.Sprint(result["task_id"])),
 	}
+	if taskType := extractTaskType(result); taskType != "" {
+		output["task_type"] = taskType
+	}
 	if requestID := strings.TrimSpace(fmt.Sprint(result["request_id"])); requestID != "" && requestID != "<nil>" {
 		output["request_id"] = requestID
 	}
@@ -253,20 +346,39 @@ func queryTaskResponse(result map[string]any) map[string]any {
 	}
 	// query-task 失败终态：注入 success: false，统一交给 writeJSON 触发 sentinel。
 	// 仅在此处做语义判定，避免污染非 query-task 路径。
-	if isTerminalFailure(result) {
+	if isBusinessFailure(result) || isTerminalFailure(result) {
 		output["success"] = false
 		if errField, ok := result["error"]; ok && errField != nil {
 			output["error"] = errField
+		} else {
+			output["error"] = "unknown error"
 		}
 	}
 	taskResult, ok := result["result"].(map[string]any)
-	if !ok {
-		return output
+	if ok {
+		for key, value := range taskResult {
+			output[key] = value
+		}
 	}
-	for key, value := range taskResult {
-		output[key] = value
+	// query-task 只有 completed 成功终态允许透传 envelope usage。
+	// pending、失败或取消终态均不得输出。
+	delete(output, "usage")
+	if isCompletedTaskStatus(result) &&
+		!isBusinessFailure(result) &&
+		!isTerminalFailure(result) {
+		applyCloudUsage(output, result)
 	}
 	return output
+}
+
+func applyCloudUsage(output map[string]any, envelope map[string]any) {
+	// usage 是 Cloud 响应 envelope 字段，不接受 result.usage 冒充。
+	delete(output, "usage")
+	usage, ok := surface.SharedCloudUsage(envelope["usage"])
+	if !ok {
+		return
+	}
+	output["usage"] = usage
 }
 
 // isTerminalTaskStatus 判断 query-task 是否处于终态。
@@ -282,6 +394,11 @@ func isTerminalTaskStatus(response map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+func isCompletedTaskStatus(response map[string]any) bool {
+	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(response["status"])))
+	return status == "completed"
 }
 
 // isTerminalFailure 判断异步任务是否处于失败终态。
@@ -311,7 +428,7 @@ func isSuccessFalse(payload map[string]any) bool {
 
 func writeJSON(writer io.Writer, value any) error {
 	if m, ok := value.(map[string]any); ok {
-		updatecheck.InjectNotice(m)
+		notice.Inject(m)
 	}
 	encoder := json.NewEncoder(writer)
 	encoder.SetEscapeHTML(false)

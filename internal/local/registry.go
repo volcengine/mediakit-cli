@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package local
 
 import (

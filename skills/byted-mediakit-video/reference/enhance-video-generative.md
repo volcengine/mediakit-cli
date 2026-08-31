@@ -1,50 +1,70 @@
 # 生成式画质增强
 
-## 能力描述
-生成式视频增强修复（generative_video_restoration）是基于扩散大模型（Diffusion-based Large Model）的生成式视频修复技术。不仅可以还原被破坏的像素，更借助大规模预训练积累的丰富视觉先验，主动补全细节、理解语义，生成真实、自然、高保真的视频内容。
+## 能力用途
 
-## 执行方式
+基于 Diffusion 扩散大模型技术提供生成式视频增强与修复，通过深度语义理解，智能补全和生成符合视频内容的真实细节，可修复视频在压缩或老化过程中损失的像素，最终产出自然、高保真的视频画面。
 
-| 项目 | 说明 |
-|------|------|
-| Domain | `video` |
-| Tool | `enhance-video-generative` |
-| 是否异步 | `是` |
-| 是否支持 local | `否` |
-| 模式说明 | cloud only；可通过 `--cloud` 强制当前调用 |
-| 幂等行为 | 如命令支持 `client_token` 与 `callback_args`，重试时复用同一组值；强制重跑时更换新的 `client_token` |
+## 参数填写规则
 
-## 参数
-| 参数 | CLI flag | 类型 | 必填 | 默认值 | 说明 |
-|------|----------|------|------|--------|------|
-| video_url | `--video-url` | string | 是 | - | 输入视频。String 类型，支持http://xxx或https://xxx格式 URL |
-| resolution | `--resolution` | string | 否 | 720p | 目标分辨率。支持的取值：720p / 1080p |
-| bitrate_level | `--bitrate-level` | string | 否 | medium | 码率档位。输出视频的目标平均码率。取值：low（低码率）/ medium（中码率，推荐）/ high（高码率）。默认为 medium |
-| fps | `--fps` | number | 否 | - | 目标帧率，单位为 fps。若未指定，输出视频将保持与原始片源一致的帧率。取值范围为 [15, 120]，建议不超过原片的 4 倍 |
-| callback_args | `--callback-args` | string | 否 | - | 可选，回调参数 |
-| client_token | `--client-token` | string | 否 | - | 可选，用于幂等，默认幂等，用户可根据需求进行调整 |
+- 可选参数仅在用户明确指定，或可从用户意图准确确定时填写；不得伪造。不能准确确定时省略，确为正确完成任务所必需时先向用户澄清。
+- 文档派生的 Cloud 公共请求字段只在用户明确提供时传递；不得由 Agent 生成、推断或补写。
 
-## 调用示例
+## Cloud
+
+### 命令与生命周期
+
+- 命令：`mediakit-cli video enhance-video-generative`
+- 生命周期：异步
+- 返回方式：返回 `task_id`，再查询终态结果。
+
+### 参数
+
+| 参数路径 | CLI flag | 类型 | 必填 | 默认值 | 枚举/范围/结构 | 说明 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `bitrate_level` | `--bitrate-level` | string | 否 | "medium" | 枚举: ["low","medium","high"] | bitrate_level 是控制输出视频平均码率的目标码率档位，会影响视频的视觉质量和最终文件体积；high 表示高码率，medium 表示中码率且为推荐档位，low 表示低码率；默认值为 medium。 |
+| `callback_args` | `--callback-args` | string | 否 | - | - | 自定义回调参数。任务完成时，您提供的内容会通过事件回调原样返回，便于关联业务；字段长度最大为 512 字节。 仅在用户明确提供该值时传递；不得由 Agent 生成、推断或补写。 |
+| `callback_url` | `--callback-url` | string | 否 | - | - | 用于接收该任务结果回调的 URL 地址。提供此参数时，其优先级高于全局回调地址；地址必须以 http:// 或 https:// 开头。 仅在用户明确提供该值时传递；不得由 Agent 生成、推断或补写。 |
+| `client_token` | `--client-token` | string | 否 | - | - | 用户请求凭证，用于幂等控制。大小写敏感，不超过 64 个 ASCII 码可打印字符。 仅在用户明确提供该值时传递；不得由 Agent 生成、推断或补写。 |
+| `fps` | `--fps` | number | 否 | - | 最小值: 15；最大值: 120 | fps 指定目标帧率，单位为 fps；支持范围为 [15, 120]；建议不超过原片帧率的 4 倍；未指定 fps 时，输出视频保持与原始片源一致的帧率。 |
+| `media_output_destination` | `--media-output-destination` | string | 否 | - | - | 指定处理产物的目标存储位置。AI MediaKit 支持将处理产物存储至您的火山引擎视频点播（VOD）空间或对象存储（TOS）桶：存储至 VOD 时设为 vod://<您的空间名>；存储至 TOS 时设为 tos://<您的桶名>。设置后，任务结果中的 url 相关字段将返回 vod:// 或 tos:// 格式的资源地址，不再返回临时下载地址。首次使用前，需要按需授权 AI MediaKit 将文件写入您的 VOD 空间或 TOS 桶。 仅在用户明确提供该值时传递；不得由 Agent 生成、推断或补写。 |
+| `queue_id` | `--queue-id` | string | 否 | - | - | 任务提交的目标队列 ID。如不传，默认使用系统自动创建的队列 ID。可将不同业务或优先级的任务提交到不同队列，以实现按队列对应的项目分账。队列可创建和管理，系统会自动为队列分配队列 ID。 仅在用户明确提供该值时传递；不得由 Agent 生成、推断或补写。 |
+| `resolution` | `--resolution` | string | 否 | "720p" | 枚举: ["720p","1080p","2k"] | resolution 指定目标分辨率；支持 720p、1080p、2k；默认值为 720p。 |
+| `video_url` | `--video-url` | string | 是 | - | - | video_url 是待增强的视频 URL；支持公网 HTTP/HTTPS URL、本地文件路径、火山引擎视频点播 vod:// 和火山引擎对象存储 tos:// 四种输入协议；仅支持 SDR 视频；支持 mp4、flv、ts、avi、mov、wmv、mkv 等主流视频格式；输入视频最高支持 1080p，长边范围为 [360,1920]，短边范围为 [360,1080]。 |
+
+### 调用示例
+
 ```bash
-mediakit-cli video enhance-video-generative \
-  --video-url https://example.com/video_url \
-  --resolution 720p \
-  --bitrate-level medium \
-  --fps 30 \
-  --callback-args sample-callback-args \
-  --client-token demo-client-token
+MEDIAKIT_RUNTIME=<当前宿主> \
+  mediakit-cli video enhance-video-generative \
+  --video-url <video_url>
 ```
 
-## 输出格式
-```json
-{
-  "task_id": "task_demo_001",
-  "request_id": "req_demo_001"
-}
+仅使用用户真实输入替换占位符；可选 flag 遵守参数填写规则，不得编造 URL、文件、枚举或业务参数。
+
+### 返回结果
+
+| 字段路径 | 类型 | 必含 | 模式 | 说明 |
+| --- | --- | --- | --- | --- |
+| `request_id` | string | 否 | Cloud | 请求标识；仅在后端返回时出现。 |
+| `task_id` | string | 是 | Cloud | 异步任务的唯一标识，用于查询任务状态并获取最终结果。 |
+| `task_type` | string | 否 | Cloud | 任务类型；仅在后端实际返回非空值时出现。 |
+| `result.duration` | number | 否 | Cloud 终态 | result.duration 是输出视频的总时长，单位为秒。 |
+| `result.fps` | number | 否 | Cloud 终态 | result.fps 是输出视频的帧率。 |
+| `result.resolution` | string | 否 | Cloud 终态 | result.resolution 是输出视频的分辨率。 |
+| `result.video_url` | string | 否 | Cloud 终态 | result.video_url 是增强后的视频文件地址；未设置 media_output_destination 时，result.video_url 返回有效期为 24 小时的 HTTPS 临时下载链接，需要及时下载保存；设置 media_output_destination 后，result.video_url 返回 vod://<空间名>/<媒资ID> 或 tos://<桶名>/<对象Key> 的存储地址。 |
+
+Cloud 调用成功后读取 `task_id`，再查询终态结果：
+
+```bash
+MEDIAKIT_RUNTIME=<当前宿主> \
+  mediakit-cli shared query-task --task-id <task_id> --poll-complete
 ```
 
-## 任务结果查询
-提交成功后会返回 `task_id`，再执行 `mediakit-cli shared query-task --task-id <task_id>` 查询。
+### 机器合同
 
-- 当前命令：`mediakit-cli video enhance-video-generative`
-- 推荐查询：`mediakit-cli shared query-task --task-id <task_id>`
+以下命令只读取本模式的实时 help/schema，不发起业务调用：
+
+```bash
+mediakit-cli video enhance-video-generative --help
+mediakit-cli video enhance-video-generative --schema
+```

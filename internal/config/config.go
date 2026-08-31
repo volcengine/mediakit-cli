@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package config
 
 import (
@@ -9,49 +11,42 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"mediakit-cli/internal/buildenv"
 )
 
 const (
 	DefaultMode          = "cloud-first"
-	DefaultSurface       = "cli"
 	ModeLocalFirst       = "local-first"
 	ModeCloudFirst       = "cloud-first"
-	ConfigDirName        = ".mediakit"
-	ConfigFileName       = "config.json"
 	EnvCacheName         = "env_cache.json"
-	UploadCacheName      = "upload_cache.json"
 	DefaultOutputDirName = "temp"
-	DefaultEndpoint      = "https://amk.cn-beijing.volces.com"
-	EnvAPIKey            = "MEDIAKIT_API_KEY"
-	EnvEndpoint          = "MEDIAKIT_ENDPOINT"
-	EnvOutputPath        = "MEDIAKIT_OUTPUT_PATH"
-	EnvSurface           = "MEDIAKIT_SURFACE"
-	EnvRuntime           = "MEDIAKIT_RUNTIME"
+	DefaultEndpoint      = "https://mediakit.cn-beijing.volces.com"
+)
+
+var (
+	EnvEndpoint   = buildenv.CloudEndpoint
+	EnvOutputPath = buildenv.OutputPath
+	EnvRuntime    = buildenv.Runtime
 )
 
 type Config struct {
 	Mode               string `json:"mode"`
-	APIKey             string `json:"api_key,omitempty"`
 	Endpoint           string `json:"endpoint,omitempty"`
-	CredentialStore    string `json:"credential_store,omitempty"`
 	OutputPath         string `json:"output_path,omitempty"`
-	Surface            string `json:"surface,omitempty"`
 	Runtime            string `json:"runtime,omitempty"`
 	DisableUpdateCheck bool   `json:"disable_update_check,omitempty"`
 }
 
 type ResolvedConfig struct {
 	Mode             string
-	APIKey           string
 	Endpoint         string
 	OutputPath       string
-	APIKeySource     string
 	EndpointSource   string
 	OutputPathSource string
 	ConfigPath       string
+	CacheDir         string
 	EnvCachePath     string
-	CredentialStore  string
-	Surface          string
 	Runtime          string
 
 	DisableUpdateCheck bool
@@ -74,25 +69,8 @@ type EnvCache struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Mode:    DefaultMode,
-		Surface: DefaultSurface,
+		Mode: DefaultMode,
 	}
-}
-
-func ConfigDir(home string) string {
-	return filepath.Join(home, ConfigDirName)
-}
-
-func ConfigFile(home string) string {
-	return filepath.Join(ConfigDir(home), ConfigFileName)
-}
-
-func EnvCacheFile(home string) string {
-	return filepath.Join(ConfigDir(home), EnvCacheName)
-}
-
-func UploadCacheFile(home string) string {
-	return filepath.Join(ConfigDir(home), UploadCacheName)
 }
 
 func DefaultOutputPath(home string) string {
@@ -107,16 +85,31 @@ func ResolveHomeDir() (string, error) {
 	return home, nil
 }
 
-func EnsureConfigDir(home string) error {
-	return os.MkdirAll(ConfigDir(home), 0o755)
-}
-
 func EnsureOutputDir(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
+func EnvCacheFile(home string) (string, error) {
+	cacheDir, err := CacheDir(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, EnvCacheName), nil
+}
+
 func ResolveOutputPath(home string) (string, string, error) {
-	// Priority: env > config > default
+	cfg, err := LoadConfig(home)
+	if err != nil {
+		return "", "", err
+	}
+	return ResolveOutputPathFromConfig(home, cfg)
+}
+
+func ResolveOutputPathFromConfig(
+	home string,
+	cfg Config,
+) (string, string, error) {
+	// Priority: env > provided config > default
 	if value := strings.TrimSpace(os.Getenv(EnvOutputPath)); value != "" {
 		outputPath, err := expandUserPath(value, home)
 		if err != nil {
@@ -124,8 +117,7 @@ func ResolveOutputPath(home string) (string, string, error) {
 		}
 		return outputPath, "env", nil
 	}
-	cfg, err := LoadConfig(home)
-	if err == nil && strings.TrimSpace(cfg.OutputPath) != "" {
+	if strings.TrimSpace(cfg.OutputPath) != "" {
 		outputPath, err := expandUserPath(cfg.OutputPath, home)
 		if err != nil {
 			return "", "", err
@@ -157,14 +149,27 @@ func LoadConfig(home string) (Config, error) {
 	if len(data) == 0 {
 		return cfg, nil
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return Config{}, err
+	}
+	if value, ok := raw["mode"].(string); ok {
+		cfg.Mode = strings.TrimSpace(value)
+	}
+	if value, ok := raw["endpoint"].(string); ok {
+		cfg.Endpoint = strings.TrimSpace(value)
+	}
+	if value, ok := raw["output_path"].(string); ok {
+		cfg.OutputPath = strings.TrimSpace(value)
+	}
+	if value, ok := raw["runtime"].(string); ok {
+		cfg.Runtime = strings.TrimSpace(value)
+	}
+	if value, ok := raw["disable_update_check"].(bool); ok {
+		cfg.DisableUpdateCheck = value
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = DefaultMode
-	}
-	if cfg.Surface == "" {
-		cfg.Surface = DefaultSurface
 	}
 	if err := ValidateMode(cfg.Mode); err != nil {
 		cfg.Mode = DefaultMode
@@ -176,16 +181,26 @@ func SaveConfig(home string, cfg Config) error {
 	if cfg.Mode == "" {
 		cfg.Mode = DefaultMode
 	}
-	if cfg.Surface == "" {
-		cfg.Surface = DefaultSurface
-	}
 	if err := ValidateMode(cfg.Mode); err != nil {
 		return err
 	}
 	if err := EnsureConfigDir(home); err != nil {
 		return err
 	}
-	return WriteJSONAtomic(ConfigFile(home), cfg)
+	raw, err := loadConfigObject(home)
+	if err != nil {
+		return err
+	}
+	raw["mode"] = cfg.Mode
+	setOptionalString(raw, "endpoint", cfg.Endpoint)
+	setOptionalString(raw, "output_path", cfg.OutputPath)
+	setOptionalString(raw, "runtime", cfg.Runtime)
+	if cfg.DisableUpdateCheck {
+		raw["disable_update_check"] = true
+	} else {
+		delete(raw, "disable_update_check")
+	}
+	return WriteJSONAtomic(ConfigFile(home), raw)
 }
 
 func ResolveConfig(home string) (ResolvedConfig, error) {
@@ -193,22 +208,33 @@ func ResolveConfig(home string) (ResolvedConfig, error) {
 	if err != nil {
 		return ResolvedConfig{}, err
 	}
+	disableUpdateCheck, err := resolveDisableUpdateCheck(
+		fileCfg.DisableUpdateCheck,
+	)
+	if err != nil {
+		return ResolvedConfig{}, err
+	}
+	cacheDir, err := CacheDir(home)
+	if err != nil {
+		return ResolvedConfig{}, err
+	}
+	envCachePath, err := EnvCacheFile(home)
+	if err != nil {
+		return ResolvedConfig{}, err
+	}
 
 	resolved := ResolvedConfig{
 		Mode:             fileCfg.Mode,
-		APIKey:           fileCfg.APIKey,
 		Endpoint:         fileCfg.Endpoint,
 		OutputPath:       DefaultOutputPath(home),
-		APIKeySource:     "config",
 		EndpointSource:   "config",
 		OutputPathSource: "default",
 		ConfigPath:       ConfigFile(home),
-		EnvCachePath:     EnvCacheFile(home),
-		CredentialStore:  fileCfg.CredentialStore,
-		Surface:          fileCfg.Surface,
+		CacheDir:         cacheDir,
+		EnvCachePath:     envCachePath,
 		Runtime:          fileCfg.Runtime,
 
-		DisableUpdateCheck: fileCfg.DisableUpdateCheck,
+		DisableUpdateCheck: disableUpdateCheck,
 	}
 	if resolved.Mode == "" {
 		resolved.Mode = DefaultMode
@@ -218,27 +244,49 @@ func ResolveConfig(home string) (ResolvedConfig, error) {
 		resolved.EndpointSource = "default"
 	}
 
-	if value := strings.TrimSpace(os.Getenv(EnvAPIKey)); value != "" {
-		resolved.APIKey = value
-		resolved.APIKeySource = "env"
-	}
 	if value := strings.TrimSpace(os.Getenv(EnvEndpoint)); value != "" {
 		resolved.Endpoint = value
 		resolved.EndpointSource = "env"
 	}
-	if value := strings.TrimSpace(os.Getenv(EnvSurface)); value != "" {
-		resolved.Surface = value
-	}
 	if value := strings.TrimSpace(os.Getenv(EnvRuntime)); value != "" {
 		resolved.Runtime = value
 	}
-	outputPath, outputSource, err := ResolveOutputPath(home)
+	outputPath, outputSource, err := ResolveOutputPathFromConfig(home, fileCfg)
 	if err != nil {
 		return ResolvedConfig{}, err
 	}
 	resolved.OutputPath = outputPath
 	resolved.OutputPathSource = outputSource
 	return resolved, nil
+}
+
+func resolveDisableUpdateCheck(configured bool) (bool, error) {
+	value, exists := os.LookupEnv(buildenv.DisableUpdateCheck)
+	value = strings.TrimSpace(value)
+	if !exists || value == "" {
+		return configured, nil
+	}
+	switch strings.ToLower(value) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf(
+			"%s 必须是 true 或 false",
+			buildenv.DisableUpdateCheck,
+		)
+	}
+}
+
+// ResolveUpdateCheckDisabled applies the runtime environment override to the
+// persisted setting. It is shared by config display and update execution.
+func ResolveUpdateCheckDisabled(home string) (bool, error) {
+	cfg, err := LoadConfig(home)
+	if err != nil {
+		return false, err
+	}
+	return resolveDisableUpdateCheck(cfg.DisableUpdateCheck)
 }
 
 // UpdateCheckDisabledByConfig reports whether the persisted config disables the
@@ -253,7 +301,11 @@ func UpdateCheckDisabledByConfig(home string) bool {
 
 func LoadEnvCache(home string) (EnvCache, error) {
 	var cache EnvCache
-	data, err := os.ReadFile(EnvCacheFile(home))
+	path, err := EnvCacheFile(home)
+	if err != nil {
+		return EnvCache{}, err
+	}
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return EnvCache{}, nil
 	}
@@ -270,10 +322,14 @@ func LoadEnvCache(home string) (EnvCache, error) {
 }
 
 func SaveEnvCache(home string, cache EnvCache) error {
-	if err := EnsureConfigDir(home); err != nil {
+	if err := EnsureCacheDir(home); err != nil {
 		return err
 	}
-	return WriteJSONAtomic(EnvCacheFile(home), cache)
+	path, err := EnvCacheFile(home)
+	if err != nil {
+		return err
+	}
+	return WriteJSONAtomic(path, cache)
 }
 
 func NewEnvCache(mode string) EnvCache {
@@ -283,16 +339,6 @@ func NewEnvCache(mode string) EnvCache {
 		DefaultMode: mode,
 		Tools:       map[string]ToolStatus{},
 	}
-}
-
-func MaskSecret(value string) string {
-	if value == "" {
-		return ""
-	}
-	if len(value) <= 6 {
-		return "***"
-	}
-	return value[:3] + strings.Repeat("*", len(value)-6) + value[len(value)-3:]
 }
 
 func expandUserPath(value string, home string) (string, error) {
@@ -306,32 +352,4 @@ func expandUserPath(value string, home string) (string, error) {
 		value = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(value, "~"+string(filepath.Separator)), "~/"))
 	}
 	return filepath.Abs(filepath.Clean(value))
-}
-
-// WriteJSONAtomic writes value as indented JSON to path atomically: it writes
-// to a temp file in the same directory and renames it into place, so concurrent
-// readers never observe a partially written file.
-func WriteJSONAtomic(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
 }

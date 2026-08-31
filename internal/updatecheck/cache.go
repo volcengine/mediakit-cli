@@ -1,3 +1,5 @@
+//go:build !mediakit_no_update
+
 package updatecheck
 
 import (
@@ -28,12 +30,19 @@ type Cache struct {
 	NotifiedAt time.Time `json:"notified_at,omitempty"`
 }
 
-func CacheFile(home string) string {
-	return filepath.Join(cliconfig.ConfigDir(home), CacheFileName)
+func CacheFile(home string) (string, error) {
+	cacheDir, err := cliconfig.CacheDir(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, CacheFileName), nil
 }
 
 func LoadCache(home string) (*Cache, error) {
-	path := CacheFile(home)
+	path, err := CacheFile(home)
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -49,7 +58,14 @@ func LoadCache(home string) (*Cache, error) {
 }
 
 func SaveCache(home string, c *Cache) error {
-	return cliconfig.WriteJSONAtomic(CacheFile(home), c)
+	if err := cliconfig.EnsureCacheDir(home); err != nil {
+		return err
+	}
+	path, err := CacheFile(home)
+	if err != nil {
+		return err
+	}
+	return cliconfig.WriteJSONAtomic(path, c)
 }
 
 func IsCacheFresh(c *Cache, runningVersion string) bool {

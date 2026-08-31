@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package commands
 
 import (
@@ -34,7 +36,7 @@ func newDoctorCmd() *cobra.Command {
 				resolved.Mode,
 				cache.CloudReady,
 				cache.LocalReady,
-				cliconfig.EnvCacheFile(home),
+				resolved.EnvCachePath,
 				renderLocalDependencyStatus(cache),
 				renderMissingLocalDependencyInstallList(cache),
 				renderAdmissionPolicies(),
