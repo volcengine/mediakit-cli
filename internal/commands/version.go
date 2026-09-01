@@ -1,3 +1,5 @@
+//go:build !mediakit_no_update
+
 package commands
 
 import (
@@ -49,6 +51,6 @@ func newVersionCmd() *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&checkUpdate, "check", false, "Check the npm registry for a newer release and report status")
+	strictBoolVar(cmd.Flags(), &checkUpdate, "check", false, "Check the npm registry for a newer release and report status")
 	return cmd
 }

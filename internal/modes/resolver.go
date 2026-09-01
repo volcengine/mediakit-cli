@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package modes
 
 import (
@@ -6,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mediakit-cli/internal/auth"
 	"mediakit-cli/internal/cloud"
 	cliconfig "mediakit-cli/internal/config"
 	"mediakit-cli/internal/local"
@@ -13,13 +16,14 @@ import (
 )
 
 type CapabilityRuntimeMeta struct {
-	Name           string
-	Domain         string
-	Description    string
-	CloudOnly      bool
-	LocalSupported bool
-	LocalSource    string
-	LocalDeps      []string
+	Name                   string
+	Domain                 string
+	Description            string
+	CloudOnly              bool
+	LocalSupported         bool
+	LocalSource            string
+	LocalDeps              []string
+	LocalUnsupportedParams []string
 }
 
 type Decision struct {
@@ -33,6 +37,57 @@ const (
 	queryTaskCapabilityName = "query-task"
 	fetchFileCapabilityName = "fetch-file"
 )
+
+func LocalSurfaceVisible() bool {
+	return true
+}
+
+func SchemaMode(
+	cmd *cobra.Command,
+	meta CapabilityRuntimeMeta,
+) (string, error) {
+	localRequested, err := cmd.Flags().GetBool("local")
+	if err != nil {
+		return "", err
+	}
+	cloudRequested, err := cmd.Flags().GetBool("cloud")
+	if err != nil {
+		return "", err
+	}
+	if localRequested && cloudRequested {
+		return "", fmt.Errorf("`--local` 与 `--cloud` 不能同时使用")
+	}
+	meta = ApplyRuntimeConstraints(meta)
+	if localRequested {
+		if !meta.LocalSupported {
+			return "", fmt.Errorf("%s 不支持 Local 模式", meta.Name)
+		}
+		return "local", nil
+	}
+	if cloudRequested {
+		if !meta.CloudOnly && !meta.LocalSupported &&
+			normalizeCapabilityName(meta.Name) == fetchFileCapabilityName {
+			return "", fmt.Errorf("%s 不支持 Cloud 模式", meta.Name)
+		}
+		return "cloud", nil
+	}
+	if normalizeCapabilityName(meta.Name) == fetchFileCapabilityName &&
+		meta.LocalSupported {
+		return "local", nil
+	}
+	home, err := cliconfig.ResolveHomeDir()
+	if err != nil {
+		return "", err
+	}
+	resolved, err := cliconfig.ResolveConfig(home)
+	if err != nil {
+		return "", err
+	}
+	if resolved.Mode == cliconfig.ModeLocalFirst && meta.LocalSupported {
+		return "local", nil
+	}
+	return "cloud", nil
+}
 
 func Dispatch(cmd *cobra.Command, meta CapabilityRuntimeMeta, params map[string]any) error {
 	meta = ApplyRuntimeConstraints(meta)
@@ -49,11 +104,21 @@ func Dispatch(cmd *cobra.Command, meta CapabilityRuntimeMeta, params map[string]
 	if err != nil {
 		return err
 	}
+	localMode, err := cmd.Flags().GetBool("local")
+	if err != nil {
+		return err
+	}
+	cloudMode, err := cmd.Flags().GetBool("cloud")
+	if err != nil {
+		return err
+	}
+	if localMode && len(meta.LocalUnsupportedParams) > 0 {
+		return fmt.Errorf(
+			"参数 %s 不支持 Local 模式；请移除这些参数或改用 Cloud 模式",
+			strings.Join(meta.LocalUnsupportedParams, ", "),
+		)
+	}
 	if normalizeCapabilityName(meta.Name) == fetchFileCapabilityName {
-		cloudMode, err := cmd.Flags().GetBool("cloud")
-		if err != nil {
-			return err
-		}
 		if cloudMode {
 			return fmt.Errorf("fetch-file 是本地文件拉取工具，不支持 --cloud")
 		}
@@ -69,7 +134,14 @@ func Dispatch(cmd *cobra.Command, meta CapabilityRuntimeMeta, params map[string]
 		}
 	}
 
-	decision, err := resolveDecision(meta, resolved, cache)
+	authContext, authErr := auth.Resolve()
+	if cloudMode && authErr != nil {
+		return fmt.Errorf(
+			"已显式指定 Cloud 模式，但云端鉴权不可用：%w",
+			authErr,
+		)
+	}
+	decision, err := resolveDecision(meta, resolved, cache, authErr == nil, authErr)
 	if err != nil {
 		return err
 	}
@@ -83,7 +155,7 @@ func Dispatch(cmd *cobra.Command, meta CapabilityRuntimeMeta, params map[string]
 	case "local":
 		return local.Execute(cmd, meta.Name, params)
 	case "cloud":
-		return cloud.Execute(cmd, meta.Name, params, resolved.APIKey, resolved.Endpoint, resolved.Surface, resolved.Runtime)
+		return cloud.Execute(cmd, meta.Name, params, authContext, resolved.Endpoint, resolved.Runtime)
 	default:
 		return fmt.Errorf("unsupported execution mode: %s", decision.Mode)
 	}
@@ -104,9 +176,8 @@ func ModeLabel(meta CapabilityRuntimeMeta) string {
 	}
 }
 
-func resolveDecision(meta CapabilityRuntimeMeta, resolved cliconfig.ResolvedConfig, cache cliconfig.EnvCache) (Decision, error) {
+func resolveDecision(meta CapabilityRuntimeMeta, resolved cliconfig.ResolvedConfig, cache cliconfig.EnvCache, cloudReady bool, cloudAuthErr error) (Decision, error) {
 	meta = ApplyRuntimeConstraints(meta)
-	cloudReady := resolved.APIKey != ""
 	localReady, localReason := evaluateLocalReadiness(meta, cache)
 	if normalizeCapabilityName(meta.Name) == fetchFileCapabilityName {
 		if localReady {
@@ -120,11 +191,27 @@ func resolveDecision(meta CapabilityRuntimeMeta, resolved cliconfig.ResolvedConf
 
 	switch resolved.Mode {
 	case cliconfig.ModeLocalFirst:
+		if len(meta.LocalUnsupportedParams) > 0 {
+			if cloudReady {
+				return Decision{
+					Mode: "cloud",
+					Warning: fmt.Sprintf(
+						"参数 %s 不支持 Local 模式，改用 Cloud 执行",
+						strings.Join(meta.LocalUnsupportedParams, ", "),
+					),
+				}, nil
+			}
+			return Decision{}, fmt.Errorf(
+				"参数 %s 不支持 Local 模式，且 Cloud 鉴权不可用：%w",
+				strings.Join(meta.LocalUnsupportedParams, ", "),
+				cloudAuthErr,
+			)
+		}
 		if meta.CloudOnly {
 			if cloudReady {
 				return Decision{Mode: "cloud"}, nil
 			}
-			return Decision{}, fmt.Errorf("%s 仅支持 cloud 执行，但当前未配置 MEDIAKIT_API_KEY", meta.Name)
+			return Decision{}, fmt.Errorf("%s 仅支持 cloud 执行：%w", meta.Name, cloudAuthErr)
 		}
 		if localReady {
 			return Decision{Mode: "local"}, nil
@@ -139,22 +226,29 @@ func resolveDecision(meta CapabilityRuntimeMeta, resolved cliconfig.ResolvedConf
 		if localReason == "" {
 			localReason = "本地执行条件不满足"
 		}
-		return Decision{}, fmt.Errorf("%s；且云端凭据未配置，无法降级", localReason)
+		return Decision{}, fmt.Errorf("%s；且云端鉴权不可用，无法降级：%w", localReason, cloudAuthErr)
 
 	case cliconfig.ModeCloudFirst:
 		if cloudReady {
 			return Decision{Mode: "cloud"}, nil
 		}
 		if meta.CloudOnly {
-			return Decision{}, fmt.Errorf("云端凭据未配置，%s 不支持本地执行", meta.Name)
+			return Decision{}, fmt.Errorf("云端鉴权不可用，%s 不支持本地执行：%w", meta.Name, cloudAuthErr)
+		}
+		if len(meta.LocalUnsupportedParams) > 0 {
+			return Decision{}, fmt.Errorf(
+				"云端鉴权不可用，且参数 %s 不支持 Local 模式，不能降级到 Local：%w",
+				strings.Join(meta.LocalUnsupportedParams, ", "),
+				cloudAuthErr,
+			)
 		}
 		if localReady {
-			return Decision{Mode: "local", Warning: "云端凭据未配置，降级到本地执行"}, nil
+			return Decision{Mode: "local", Warning: "云端鉴权不可用，降级到本地执行"}, nil
 		}
 		if localReason == "" {
 			localReason = "本地依赖不满足"
 		}
-		return Decision{}, fmt.Errorf("云端凭据未配置；%s", localReason)
+		return Decision{}, fmt.Errorf("云端鉴权不可用：%v；%s", cloudAuthErr, localReason)
 
 	default:
 		return Decision{}, fmt.Errorf("unsupported config mode: %s", resolved.Mode)
@@ -235,6 +329,7 @@ func ApplyRuntimeConstraints(meta CapabilityRuntimeMeta) CapabilityRuntimeMeta {
 		meta.LocalSupported = true
 		meta.LocalSource = "generated"
 		meta.LocalDeps = nil
+		meta.LocalUnsupportedParams = nil
 		return meta
 	}
 	if normalizeCapabilityName(meta.Name) == queryTaskCapabilityName {
@@ -242,11 +337,13 @@ func ApplyRuntimeConstraints(meta CapabilityRuntimeMeta) CapabilityRuntimeMeta {
 		meta.LocalSupported = false
 		meta.LocalSource = ""
 		meta.LocalDeps = nil
+		meta.LocalUnsupportedParams = nil
 	}
 	if meta.CloudOnly {
 		meta.LocalSupported = false
 		meta.LocalSource = ""
 		meta.LocalDeps = nil
+		meta.LocalUnsupportedParams = nil
 	}
 	return meta
 }

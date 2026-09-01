@@ -19,7 +19,7 @@ import "errors"
 // 由以下三个 writer 统一抛出：
 //   - internal/cloud/executor.go::writeJSON（cloud 主路径与 query-task 终态）
 //   - internal/local/executor.go::writeJSON（local 主路径）
-//   - internal/commands/registry.go::writeCapabilityError（参数/依赖/兜底错误）
+//   - internal/commands/registry_surface.go::writeCapabilityError（参数/依赖/兜底错误）
 //
 // cmd/mediakit/main.go 用 errors.Is 识别后：
 //   - 跳过 stderr 打印（错误结构已在 stdout JSON 中）

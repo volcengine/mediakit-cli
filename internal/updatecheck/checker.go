@@ -1,3 +1,5 @@
+//go:build !mediakit_no_update
+
 package updatecheck
 
 import (
@@ -233,8 +235,11 @@ func shouldSkip() bool {
 	if strings.TrimSpace(build.Version) == "dev" {
 		return true
 	}
-	if home, err := cliconfig.ResolveHomeDir(); err == nil && cliconfig.UpdateCheckDisabledByConfig(home) {
-		return true
+	if home, err := cliconfig.ResolveHomeDir(); err == nil {
+		disabled, resolveErr := cliconfig.ResolveUpdateCheckDisabled(home)
+		if resolveErr != nil || disabled {
+			return true
+		}
 	}
 	return false
 }
