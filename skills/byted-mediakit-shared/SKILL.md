@@ -1,8 +1,8 @@
 ---
 name: byted-mediakit-shared
-version: '1.0.0'
+version: '0.2.1'
 license: 'MIT'
-description: '1. mediakit-cli: supports a variety of operations such as audio/video processing, editing, and images, with some capabilities covering both cloud and local modes; 2. mediakit-cli shared: environment checks, initialization config, command structure, authentication config, async task responses, and error handling.'
+description: 'MediaKit 是面向音视频与图像处理的专业工具集，覆盖视频剪辑与合成、音频处理、视频理解与增强、图像处理与内容理解等工作流。用户明确提出剪辑、拼接、裁剪、转场、滤镜、运镜、混音、提取字幕、语音转字幕、音视频处理、图片处理、视频分析或画质增强目标时，先加载本 Skill，再按对象和目标选择 audio、editing、image 或 video。不承担具体能力参数说明。'
 permissions:
   - shell
 metadata:
@@ -11,208 +11,156 @@ metadata:
   cliHelp: 'mediakit-cli --help'
   product: mediakit-cli/skills
   domain: shared
-  capability_count: 14
+  capability_count: 0
 ---
 
-# MediaKit Shared Rules
+# MediaKit 专业媒体处理入口
 
-This skill explains how to operate on media resources via `mediakit-cli`, and the shared rules and caveats that apply to every call.
+MediaKit 是面向音视频与图像处理的专业工具集。它将常见的媒体加工、内容理解和
+智能增强能力统一到 `mediakit-cli`，适合从素材处理到成片制作的完整工作流。
 
-## Prerequisites
+## 使用规则
 
-### Install the CLI
+1. 通过本 Skill 或领域 Skill **实际执行** `mediakit-cli` 业务命令时，必须在同一次
+   调用中注入来源与宿主，避免 CLI 无法识别调用来源：
+   - `MEDIAKIT_SURFACE=skill`（本 Skill / 领域 Skill 调用固定为 `skill`）
+   - `MEDIAKIT_RUNTIME=<当前 Agent 宿主>`（无法判断时用 `unknown`）
+2. 注入方式：在命令前设置环境变量（推荐），不要把这两个值当成 CLI flag 或业务参数。
+3. `--help` / `--schema` / `--domains` / `--version` 等只读发现命令可不注入；一旦发起
+   真实处理或 `shared query-task`，必须注入。
 
-Before first use, confirm the CLI is installed:
+示例（每次真实调用都带上）：
 
 ```bash
-# Install
-npm install -g @volcengine/mediakit-cli
+MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-image-to-video --video-url <url> --sub-image-url <url>
+MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli shared query-task --task-id <task_id>
+```
 
-# Verify
+`<runtime>` 填当前宿主标识（如 `cursor`、`claude-code`、`codex`）；不确定时填
+`unknown`。不要省略 `MEDIAKIT_SURFACE=skill`。
+
+## 能力范围
+
+- **视频剪辑与合成**：裁剪、拼接、转场、调速、音量调整、视频滤镜、运镜、画面叠加、字幕压制、
+  混音、淡入淡出、音视频提取与合流、文字滚屏、图转视频和多画面编排。
+- **音频与音轨处理**：音频转码与媒资探测、语音边界定位、人声与背景声分离，
+  以及面向视频音轨的处理。
+- **视频理解与增强**：视频内容分析、剧情/剧本与精彩高光拆条、画质增强与画质检测、抽帧、
+  语音转字幕与字幕提取、字幕擦除、水印处理、隐私保护、场景与语义分段、画面文字识别、
+  转码转封装、抠像与换脸等。
+- **图像处理与内容理解**：尺寸缩放与体积治理、元信息探测、裁剪旋转翻转与圆角、颜色与锐化、
+  负片、模糊与打码、水印、背景移除、文字识别、画质评估与智能裁剪等。
+
+## 能力选择与优先加载
+
+按用户的处理对象和明确目标选择领域 Skill：
+
+| 用户目标                                                 | 优先加载                 |
+| -------------------------------------------------------- | ------------------------ |
+| 对现有素材进行裁剪、拼接、转场、滤镜、运镜、叠加、混音或成片编排 | `byted-mediakit-editing` |
+| 处理音频转码、音轨、语音边界或人声与背景声                   | `byted-mediakit-audio`   |
+| 处理单张或批量图片、尺寸体积治理、文字识别、图片质量或图像编辑 | `byted-mediakit-image`   |
+| 视频理解、高光拆条、抽帧、画质增强或检测、提取字幕、语音转字幕、字幕擦除、水印、隐私、转码或视频智能处理 | `byted-mediakit-video`   |
+
+如果一个请求同时包含多个阶段，先加载与主要产出最匹配的领域 Skill，再按工作流
+需要加载其他领域 Skill。只说明“处理一个视频”或“处理一张图片”而没有说明目标
+时，先向用户澄清，不要根据媒体类型猜测具体能力。
+
+选定领域后，必须先读取该领域 Skill，再读取最终选定工具的完整 reference，最后
+依据当前 CLI 的机器合同构造参数。共享入口只负责能力导航和通用 CLI 使用方式，
+不重复具体工具的参数、枚举或结果字段。
+
+## 安装与可用性检查
+
+首次使用时安装 CLI 与随附 Skills：
+
+```bash
+npx @volcengine/mediakit-cli install -y
+```
+
+安装后验证公开入口：
+
+```bash
 mediakit-cli --version
+mediakit-cli --help
 ```
 
-### Authentication check
-
-Priority: environment variables > config file (path: `~/.mediakit/config.json`).
-
-#### Field reference
-
-- Environment variables / config file: `MEDIAKIT_API_KEY`, `MEDIAKIT_ENDPOINT`, `MEDIAKIT_SURFACE`, `MEDIAKIT_RUNTIME`
-
-| Variable            | Required             | Description                                                                                                                                              |
-| ------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MEDIAKIT_API_KEY`  | Required (cloud mode) | API authentication token                                                                                                                                 |
-| `MEDIAKIT_ENDPOINT` | Optional             | API endpoint                                                                                                                                             |
-| `MEDIAKIT_SURFACE`  | Optional             | Request-source Header `x-surface`. Defaults to `cli`. Skill should set `skill`, Plugin should set `plugin`; CLI reports them as `cli/skill` or `cli/plugin`. |
-| `MEDIAKIT_RUNTIME`  | Optional             | Request-source Header `x-runtime`. Set to host name such as `claude` / `arkclaw`; falls back to environment probing or `unknown` when not configured.    |
-
-When any required field is missing, stop execution and output the full list of missing items together with fix suggestions.
-
-Cloud calls automatically carry `x-surface` / `x-runtime`. Header priority: environment variables > `~/.mediakit/config.json` > defaults / environment probing. When this Skill/Plugin invokes cloud capabilities through `mediakit-cli`, the runtime should inject `MEDIAKIT_SURFACE=skill|plugin` and `MEDIAKIT_RUNTIME=<host>`. The CLI keeps the original product prefix and reports `x-surface=cli/skill` or `x-surface=cli/plugin`. If no explicit configuration is provided, the CLI defaults to `x-surface=cli`; `x-runtime` falls back to `IDENTITY_NAME` / `OPENCLAW_SERVICE_MARKER` environment probing, and finally to `unknown`.
-
-### Source-reporting constraints
-
-- When a Skill invokes `mediakit-cli`, it must explicitly set `MEDIAKIT_SURFACE=skill` and must not rely on the user's pre-existing environment variables.
-- When a Plugin invokes `mediakit-cli`, it must explicitly set `MEDIAKIT_SURFACE=plugin` and must not reuse the Skill value.
-- The host runtime identifier should also be explicitly set via `MEDIAKIT_RUNTIME=<host>`; if unset, the CLI falls back to environment probing or `unknown`.
+需要重装当前版本携带的 Skills 时执行：
 
 ```bash
-MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-image-to-video
-
-MEDIAKIT_SURFACE=plugin MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-image-to-video
+npx @volcengine/mediakit-cli install --skills-only -y
 ```
 
-## CLI usage
-
-### Initialization
-
-Run the init wizard before first use:
+## 初始化与检查
 
 ```bash
 mediakit-cli init
-```
-
-For non-interactive initialization (Agents), pass the request-source and runtime configuration explicitly:
-
-```bash
-mediakit-cli init --mode cloud-first --api-key <key> --runtime <runtime> --surface cli --yes
-mediakit-cli init --mode local-first --api-key <key> --endpoint <url> --output-path ~/mediakit-output --runtime <runtime> --surface cli --credential-store config --yes
-```
-
-Common commands after initialization:
-
-```bash
-# Show current configuration
 mediakit-cli config show
-
-# Switch the default mode to local-first
-mediakit-cli config set mode local-first
-
-# Switch the default mode to cloud-first
-mediakit-cli config set mode cloud-first
-
-# Refresh environment checks and view dependency status
 mediakit-cli doctor
 ```
 
-### Command structure
+`doctor` 用于检查当前 CLI 与本地处理依赖；具体工具是否支持本地处理，以对应
+领域 Skill 和工具 reference 为准。
 
-MediaKit CLI consistently uses the `domain + tool` invocation shape:
-
-```bash
-mediakit-cli {domain} {tool} [flags]
-```
-
-Common help commands:
+## 命令发现与机器合同
 
 ```bash
-# List all domains
 mediakit-cli --domains
-
-# List tools in a given domain
-mediakit-cli {domain} --help
-
-# Show parameters of a specific tool
-mediakit-cli {domain} {tool} --help
-
-# Dynamically discover tool capability and return structure
-mediakit-cli {domain} {tool} --schema
-mediakit-cli --local {domain} {tool} --schema
+mediakit-cli <domain> --help
+mediakit-cli <domain> <tool> --help
+mediakit-cli <domain> <tool> --schema
 ```
 
-Domains currently covered by this product: `editing`, `video`.
+`--schema` 只读取当前有效模式的机器合同，不发起业务调用；顶层包含 `name`、
+`description`、`input_schema` 和 `output_schema`。构造参数前先读取目标工具的
+`--help` 与 `--schema`，并以完整 reference 中的字段说明为 Agent 使用指引。
 
-### Schema discovery
+## 媒体输入
 
-Every capability command supports `--schema`, used by Agents to dynamically read tool capabilities. Required business parameters are not enforced when `--schema` is used.
+直接把用户提供的媒体输入传给工具参数。本机文件请传本地文件路径（如
+`/path/to/file.jpg` 或 `./file.jpg`），不要自行添加 `mediakit://` 前缀；CLI
+的媒体输入适配器会处理上传。不需要额外创建上传命令或上传参数。
 
-The returned structure contains:
+## Cloud / Local 模式
 
-- `name`: tool name in snake_case, e.g. `add_image_to_video`
-- `description`: tool description, automatically including `Mode` and `Async` information
-- `input_schema`: input parameter JSON Schema
-- `output_schema`: return structure for the current execution mode
+未指定模式时，由 CLI 当前配置选择 Cloud-first 或 Local-first。`--local` 与
+`--cloud` 只用于单次命令覆盖；CLI 的 `--help` 与 `--schema` 只显示所选模式的
+参数与结果。
 
-Output disambiguation rules:
-
-- By default the return surface is resolved against the global `mode` configuration
-- `--local ... --schema` outputs the local-mode return surface; local mode returns the final result fields directly
-- Cloud async tools output `task_id` / `request_id`, and describe the completed-state result of `query-task` under `final_result`
-- `query-task` is cloud only; its schema describes task status plus the completed-state result
-
-Examples:
+规范命令顺序为：
 
 ```bash
-mediakit-cli editing trim-video --schema
-mediakit-cli --local editing trim-video --schema
+mediakit-cli --cloud <domain> <tool> [flags]
+mediakit-cli --local <domain> <tool> [flags]
 ```
 
-### Per-invocation mode override
-
-In addition to `config set mode` for setting the default mode, you can override the mode for a single command only:
+Local 不支持的参数不能被静默忽略；应改用 Cloud 或移除对应参数。Local 工具同步
+返回处理结果，不产生 Cloud 异步任务。Local 输出目录通过 CLI 配置管理：
 
 ```bash
-mediakit-cli --local editing add-image-to-video
-
-mediakit-cli --cloud editing add-image-to-video
+mediakit-cli config set output-path <输出目录>
 ```
 
-Additional rules:
+## 异步结果
 
-- `--local` / `--cloud` only affect the current command and do not modify the global `config.mode`
-- `--local` and `--cloud` are mutually exclusive and cannot be passed together
-
-## Async tasks
-
-When an async media-processing task is accepted successfully, the response contains a `task_id` field. Use the `shared query-task` command to poll the result.
+Cloud 异步能力返回 `task_id`。先使用共享查询命令获取任务状态与最终业务结果：
 
 ```bash
 mediakit-cli shared query-task --task-id <task_id>
 ```
 
-## local / cloud constraints
+需要持续等待终态时，按 [query_task.md](reference/query_task.md) 中的查询协议执行。
 
-- `query-task` is a **cloud only** tool
-- local mode does not support `query-task`
-- The current capability set runs primarily in cloud mode; when an explicit declaration is required, prefer `--cloud`
+## 更新
 
-### Cloud-mode media input notes
+```bash
+mediakit-cli update
+mediakit-cli update --check
+mediakit-cli version --check
+```
 
-- When a command runs with `--cloud` or under the `cloud-first` strategy, media input parameters (`video_url`, `audio_url`, `image_url`, `subtitle_url`, `sub_image_url`, and their corresponding array / object sub-fields) accept `http://` / `https://` URLs, `mediakit://...` file_ids, or local file paths
-- `http://` / `https://` URLs and `mediakit://...` file_ids are submitted as-is; local file paths are first uploaded by the CLI as `mediakit://...` file_ids and then submitted to the cloud tool
-- Parameter descriptions in each tool's reference are sourced from the APIHub/OpenAPI raw field descriptions; even when they show public URLs or HTTP/HTTPS URLs, that only reflects the resource form the cloud API ultimately receives — it does not restrict the CLI's ability to pre-process local paths in cloud mode
+## 共享查询协议
 
-### Local-mode notes
-
-- Local output directory priority: `--output-path` > `MEDIAKIT_OUTPUT_PATH` > config `output_path` > `~/.mediakit/temp`
-- When `--output-path` points to a concrete media filename, it is used as the final output file directly; otherwise the filename is built as `{source_name}_{tool_name}.{ext}`, with a 6-digit random suffix appended on collision
-- When no filename can be extracted from the input URL or path, fall back to `{tool_name}-{UnixNano}.{ext}`
-- Local mode depends on `ffmpeg` / `ffprobe`; when missing, the error response includes an `install_guide`
-- Local-mode media processing output must conform to the corresponding interface response schema; internal execution metadata must not be emitted
-
-### Error responses
-
-- CLI cloud mode forwards the original error object returned by the API as-is, without extracting `message`
-- CLI local mode returns a structured error: `{"error":{"type":"...","code":"...","message":"..."}}`
-- MCP `error_response` forwards the original error content as-is; a dict is used directly as the `error` field value
-
-## Idempotency parameter maintenance
-
-| Parameter        | Purpose                | Maintenance guidance                                                                |
-| ---------------- | ---------------------- | ----------------------------------------------------------------------------------- |
-| `client_token`   | Explicit idempotency   | Reuse the same value on request retries; use a new unique value to force re-execute |
-| `callback_args`  | Passthrough to callback | Maintain together with `client_token` to ease callback reconciliation and retry tracking |
-
-Additional rules:
-
-- `client_token` must not exceed 64 characters
-- `callback_args` is useful for callback passthrough and reconciliation tracking
-
-## Polling strategy
-
-| Parameter               | Description                       | Default |
-| ----------------------- | --------------------------------- | ------- |
-| `poll-interval-seconds` | Polling interval                  | 10s     |
-| `max-poll-attempts`     | Polling attempts; 0 disables it   | 0       |
-| `poll-complete`         | Block until terminal status       | -       |
+| 协议       | 说明                                    | 命令                             | 参考                                               |
+| ---------- | --------------------------------------- | -------------------------------- | -------------------------------------------------- |
+| query-task | 查询 Cloud 异步任务状态与终态业务结果。 | `mediakit-cli shared query-task` | [reference/query_task.md](reference/query_task.md) |

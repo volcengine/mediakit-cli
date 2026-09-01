@@ -1,3 +1,5 @@
+//go:build !mediakit_cloud_only
+
 package config
 
 import (
@@ -5,17 +7,22 @@ import (
 	"os/exec"
 	"strings"
 
+	"mediakit-cli/internal/auth"
 	"mediakit-cli/internal/local/admission"
 )
 
 func RefreshEnvCache(home string) (EnvCache, error) {
-	resolved, err := ResolveConfig(home)
+	cfg, err := LoadConfig(home)
 	if err != nil {
 		return EnvCache{}, err
 	}
+	return RefreshEnvCacheForConfig(home, cfg)
+}
 
-	cache := NewEnvCache(resolved.Mode)
-	cache.CloudReady = resolved.APIKey != ""
+func RefreshEnvCacheForConfig(home string, cfg Config) (EnvCache, error) {
+	cache := NewEnvCache(cfg.Mode)
+	_, authErr := auth.Resolve()
+	cache.CloudReady = authErr == nil
 
 	ffmpegStatus := probeFFmpegVersion()
 	ffprobeStatus := probeFFprobeVersion()
