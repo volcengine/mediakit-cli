@@ -18,5 +18,5 @@ func main() {
 	if !errors.Is(err, cliexit.ErrBusinessFailure) {
 		fmt.Fprintln(os.Stderr, err)
 	}
-	os.Exit(1)
+	os.Exit(cliexit.ExitCode(err))
 }

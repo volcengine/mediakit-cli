@@ -19,7 +19,7 @@ func (value *strictBoolValue) Set(raw string) error {
 		*value.target = false
 		return nil
 	default:
-		return fmt.Errorf("must be true or false")
+		return fmt.Errorf("must use --flag=true, --flag=false, or bare --flag; space-separated boolean values are not supported")
 	}
 }
 

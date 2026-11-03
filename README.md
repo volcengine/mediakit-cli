@@ -95,9 +95,9 @@ npx @volcengine/mediakit-cli install -y
 
 ```bash
 # API Key 获取地址：https://console.volcengine.com/imp/ai-mediakit/settings
-mediakit-cli init \
+MEDIAKIT_API_KEY=<your-api-key> \
+  mediakit-cli init \
   --mode cloud-first \
-  --api-key <your-api-key> \
   --yes
 ```
 

@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxResponseBodyBytes int64 = 16 << 20
+
 type APIError struct {
 	StatusCode int
 	Payload    map[string]any
@@ -36,9 +38,12 @@ func (c *Client) do(req *http.Request) (map[string]any, error) {
 	}
 	defer resp.Body.Close()
 
-	payloadBytes, err := io.ReadAll(resp.Body)
+	payloadBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(payloadBytes)) > maxResponseBodyBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes", maxResponseBodyBytes)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, newAPIError(resp.StatusCode, payloadBytes)
@@ -69,6 +74,14 @@ func newAPIError(statusCode int, payloadBytes []byte) error {
 }
 
 func errorResponse(err error, taskID string, requestID string) map[string]any {
+	return errorResponseWithType(err, taskID, requestID, "transport")
+}
+func clientErrorResponse(err error, taskID string) map[string]any {
+	output := errorResponseWithType(err, taskID, "", "client")
+	output["__exit_code"] = 2
+	return output
+}
+func errorResponseWithType(err error, taskID string, requestID string, errorType string) map[string]any {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		if apiErr.Payload != nil && isFailureEnvelope(apiErr.Payload) {
@@ -81,16 +94,23 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 	}
 
 	output := map[string]any{
-		"success": false,
+		"success":    false,
+		"error_type": "api",
+	}
+	if apiErr == nil {
+		output["error_type"] = errorType
 	}
 
 	var taskType string
 
 	if apiErr != nil {
+		if payload := apiErrorPayload(apiErr.Payload); payload != nil {
+			output["__exit_code"] = errorExitCode(payload["code"])
+		}
 		if apiErr.Payload != nil {
-			output["error"] = apiErr.Payload
+			output["error"] = apiErrorPayload(apiErr.Payload)
 		} else {
-			output["error"] = strings.TrimSpace(apiErr.Body)
+			output["error"] = map[string]any{"message": strings.TrimSpace(apiErr.Body)}
 		}
 		if requestID == "" {
 			requestID = extractRequestID(apiErr.Payload)
@@ -102,11 +122,11 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 			taskType = extractTaskType(apiErr.Payload)
 		}
 	} else if err != nil {
-		output["error"] = err.Error()
+		output["error"] = map[string]any{"message": err.Error()}
 	}
 
-	if output["error"] == nil || output["error"] == "" {
-		output["error"] = "unknown error"
+	if output["error"] == nil {
+		output["error"] = map[string]any{"message": "unknown error"}
 	}
 	if taskID != "" {
 		output["task_id"] = taskID
@@ -114,8 +134,36 @@ func errorResponse(err error, taskID string, requestID string) map[string]any {
 	if taskType != "" {
 		output["task_type"] = taskType
 	}
-	if requestID != "" {
+	if apiErr != nil && requestID != "" {
 		output["request_id"] = requestID
+	}
+	return output
+}
+
+func errorExitCode(value any) int {
+	code, _ := value.(string)
+	switch code {
+	case "MissingParameter", "InvalidParameter":
+		return 2
+	case "AuthenticationError", "AccessDenied":
+		return 3
+	case "TaskCanceled", "RequestLimitExceeded":
+		return 4
+	case "InternalServiceError", "DownloadFileError", "AbilityProcessingError", "ServiceInitializingError", "InternalServiceTimeout":
+		return 5
+	}
+	return 1
+}
+
+func apiErrorPayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{"message": "unknown error"}
+	}
+	output := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if key != "http_status" {
+			output[key] = value
+		}
 	}
 	return output
 }
@@ -156,12 +204,18 @@ func isBusinessFailure(payload map[string]any) bool {
 // businessFailureResponse 把业务级失败的响应体直接透传输出。
 func businessFailureResponse(payload map[string]any) map[string]any {
 	output := map[string]any{
-		"success": false,
+		"success":    false,
+		"error_type": "api",
 	}
-	if errField, ok := payload["error"]; ok && errField != nil {
-		output["error"] = errField
+	if errorPayload, ok := payload["error"].(map[string]any); ok {
+		output["error"] = apiErrorPayload(errorPayload)
+	} else if payload["error"] != nil {
+		output["error"] = payload["error"]
 	} else {
-		output["error"] = "unknown error"
+		output["error"] = apiErrorPayload(payload)
+	}
+	if errorMap, ok := output["error"].(map[string]any); ok {
+		output["__exit_code"] = errorExitCode(errorMap["code"])
 	}
 	if taskID := extractTaskID(payload); taskID != "" {
 		output["task_id"] = taskID

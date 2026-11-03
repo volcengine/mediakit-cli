@@ -7,9 +7,13 @@
 | 退出码 | 含义                            | 触发场景                                                                                                       |
 | ------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `0`    | 命令成功                        | 所有路径成功完成；同步成功 / 异步提交成功（拿到 task_id）/ query-task 终态为 `completed`                       |
-| `1`    | 业务失败或框架/参数错误         | 任意 stdout JSON 出现 `success: false`（cloud）、`error` 字段（local）、`status: failed/canceled/cancelled`（query-task 终态），或参数解析失败 |
+| `1`    | 未分类业务失败或框架错误         | 未映射的 stdout JSON `success: false` / `error`，或未分类运行时错误 |
+| `2`    | 参数错误                        | `MissingParameter`、`InvalidParameter`，以及 CLI 前置参数校验失败 |
+| `3`    | 鉴权或权限错误                  | `AuthenticationError`、`AccessDenied` |
+| `4`    | 任务取消或限流                  | `TaskCanceled`、`RequestLimitExceeded` |
+| `5`    | 服务端或处理链路错误            | `InternalServiceError`、`DownloadFileError`、`AbilityProcessingError`、`ServiceInitializingError`、`InternalServiceTimeout` |
 
-> `mediakit-cli` 不再使用退出码区分"框架错误"和"业务错误"；上层调用方应**优先解析 stdout JSON**，把退出码当作辅助信号。
+> 上层调用方应**优先解析 stdout JSON**，把退出码当作辅助信号；退出码用于快速区分常见错误类别。
 
 ## 二、cloud 路径（远程 API）
 
@@ -35,13 +39,13 @@
 
 ### 2.3 业务失败响应
 
-任意以下情形都视为业务失败，CLI 写完 JSON 后退出码 `1`：
+任意以下情形都视为业务失败，CLI 写完 JSON 后按错误码映射退出码：
 
 | 情形                                              | 判定字段                                                       |
 | ------------------------------------------------- | -------------------------------------------------------------- |
 | 主调用 HTTP 2xx 但 `success=false`                | `success == false`                                             |
 | 主调用 HTTP ≥ 400 网络/服务错误                   | `errorResponse(...)` 统一写 `success: false` + `error: {...}`  |
-| `query-task` 终态为 `failed` / `canceled` / `cancelled` | `status` 字段（注意 queryTaskResponse 没有 `success` 字段） |
+| `query-task` 终态为 `failed` / `canceled` / `cancelled` | `status` 字段，并注入 `success=false`；若响应含结构化 `error.code`，退出码按 2.3 错误码映射 |
 
 业务失败 JSON 结构：
 
@@ -66,11 +70,11 @@
 | `running`   | 进行中（非终态）           | `0`    |
 | `queued`    | 排队中（非终态）           | `0`    |
 | `completed` | 已完成（终态，成功）       | `0`    |
-| `failed`    | 已失败（终态，业务失败）   | `1`    |
-| `canceled`  | 已取消（终态，业务失败）   | `1`    |
-| `cancelled` | 同 `canceled`（兼容拼写）  | `1`    |
+| `failed`    | 已失败（终态，业务失败）   | 按 `error.code` 映射；无可识别 code 时为 `1` |
+| `canceled`  | 已取消（终态，业务失败）   | 按 `error.code` 映射；无可识别 code 时为 `1` |
+| `cancelled` | 同 `canceled`（兼容拼写）  | 按 `error.code` 映射；无可识别 code 时为 `1` |
 
-只有 `failed/canceled/cancelled` 三个状态被识别为"业务失败终态"，退出码为 `1`；其他状态退出码 `0`。
+只有 `failed/canceled/cancelled` 三个状态被识别为"业务失败终态"；其他状态退出码 `0`。
 
 ## 三、local 路径（本地执行）
 

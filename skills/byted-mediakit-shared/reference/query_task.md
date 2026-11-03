@@ -8,7 +8,6 @@
 
 - task_id 必须来自真实异步任务受理结果；可选轮询参数仅在用户明确指定，或可从用户意图准确确定时填写，不得伪造。
 - `max_poll_timeout_seconds` 默认 `0` 表示不限制；仅在用户明确需要限制单次轮询总时长时填写。`poll_interval_seconds × max_poll_attempts` 不得超过该上限。
-
 ## Cloud
 
 ### 命令与生命周期
@@ -35,10 +34,10 @@ mediakit-cli shared query-task \
 
 | 参数路径 | CLI flag | 类型 | 必填 | 默认值 | 枚举/范围/结构 | 说明 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `max_poll_attempts` | `--max-poll-attempts` | integer | 否 | 0 | 最小值: 0 | 最多轮询次数；0 表示只查询一次。与 `poll_interval_seconds` 的乘积不得超过 `max_poll_timeout_seconds`。 |
+| `max_poll_attempts` | `--max-poll-attempts` | integer | 否 | 0 | 最小值: 0 | 最多轮询次数；0 表示只查询一次。 |
 | `poll_complete` | `--poll-complete` | boolean | 否 | false | - | 是否持续轮询直到任务进入终态。 |
 | `poll_interval_seconds` | `--poll-interval-seconds` | number | 否 | 10 | 大于: 0 | 轮询间隔，单位为秒；必须大于 0，仅在持续轮询时使用。 |
-| `max_poll_timeout_seconds` | `--max-poll-timeout-seconds` | number | 否 | 0 | 最小值: 0 | 轮询总时长上限，单位为秒；0 表示不限制。 |
+| `max_poll_timeout_seconds` | `--max-poll-timeout-seconds` | number | 否 | 0 | 最小值: 0 | 轮询总时长上限，单位为秒；0 表示不限制。poll_interval_seconds × max_poll_attempts 不得超过该上限。 |
 | `task_id` | `--task-id` | string | 是 | - | - | 异步任务的唯一标识，用于查询任务状态并获取最终结果。 |
 
 ### 返回结果

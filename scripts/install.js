@@ -11,6 +11,7 @@ const http = require("node:http");
 const pkg = require("../package.json");
 
 const PROJECT_NAME = "mediakit-cli";
+const SAFE_VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z._-]*$/;
 
 // Deprecated env names (MEDIKIT_*) are still read for back-compat but emit a
 // warning. New env names use the MEDIAKIT_* prefix (Rule 22). The 0.3.0
@@ -160,6 +161,10 @@ function ensureSuccess(result, label) {
   }
 }
 
+function powershellLiteral(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
 function extractArchive(archivePath, extractDir, platform) {
   fs.mkdirSync(extractDir, { recursive: true });
 
@@ -169,7 +174,7 @@ function extractArchive(archivePath, extractDir, platform) {
       [
         "-NoProfile",
         "-Command",
-        `Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${extractDir}' -Force`,
+        `Expand-Archive -LiteralPath ${powershellLiteral(archivePath)} -DestinationPath ${powershellLiteral(extractDir)} -Force`,
       ],
       { stdio: "inherit" }
     );
@@ -246,6 +251,9 @@ async function install(options = {}) {
   const arch = resolveArch();
   const version =
     readEnv("MEDIAKIT_CLI_VERSION", "MEDIKIT_CLI_VERSION") || pkg.version;
+  if (!SAFE_VERSION_PATTERN.test(version)) {
+    throw new Error("invalid MEDIAKIT_CLI_VERSION");
+  }
   const targetBinary = path.join(binDir, binaryName());
 
   if (!options.force && fs.existsSync(targetBinary)) {
