@@ -1,7 +1,9 @@
 package cloud
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,8 @@ import (
 )
 
 const mediaUploadCommand = "request-media-upload-url"
+
+var uploadCacheWarningWriter io.Writer = os.Stderr
 
 var mediaInputNames = map[string]bool{
 	"video_url":     true,
@@ -70,8 +74,9 @@ func materializeCloudValue(
 		next := make(map[string]any, len(typed))
 		for childKey, childValue := range typed {
 			childSchema := mediaInputPropertySchema(schema, childKey)
-			childMediaContext := mediaContext ||
-				isMediaInputSchema(childSchema) ||
+			// A media object may contain ordinary strings such as title or
+			// description. Only the child schema/key can authorize uploading it.
+			childMediaContext := isMediaInputSchema(childSchema) ||
 				isMediaInputField(childKey)
 			materialized, err := materializeCloudValue(
 				client,
@@ -160,6 +165,10 @@ func isMediaInputSchema(schema map[string]any) bool {
 }
 
 func materializeCloudMediaString(client *Client, home string, command string, value string) (string, error) {
+	return materializeCloudMediaStringWithContext(context.Background(), client, home, command, value)
+}
+
+func materializeCloudMediaStringWithContext(ctx context.Context, client *Client, home string, command string, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || isRemoteOrMediaKitURL(value) {
 		return value, nil
@@ -176,16 +185,21 @@ func materializeCloudMediaString(client *Client, home string, command string, va
 	now := time.Now().UTC()
 	authKey := computeUploadCacheAuth(client.Endpoint, client.Auth.UploadCacheScopeIdentity())
 	if fileID, err := lookupUploadCache(home, authKey, identity, now); err != nil {
-		return "", err
+		fmt.Fprintf(uploadCacheWarningWriter, "mediakit-cli: 上传缓存读取失败，已忽略缓存并继续上传: %v\n", err)
 	} else if fileID != "" {
 		return fileID, nil
 	}
 
-	fileID, err := client.uploadLocalMediaFile(command, identity.AbsPath)
+	fileID, err := client.uploadLocalMediaFileWithContext(ctx, command, identity.AbsPath)
 	if err != nil {
 		return "", err
 	}
-	return storeUploadCache(home, authKey, identity, fileID, now)
+	cachedID, err := storeUploadCache(home, authKey, identity, fileID, now)
+	if err != nil {
+		fmt.Fprintf(uploadCacheWarningWriter, "mediakit-cli: 上传缓存写入失败，已继续使用本次上传结果: %v\n", err)
+		return cachedID, nil
+	}
+	return cachedID, nil
 }
 
 func resolveLocalMediaIdentity(value string) (fileIdentity, bool, error) {
@@ -194,6 +208,9 @@ func resolveLocalMediaIdentity(value string) (fileIdentity, bool, error) {
 	if err != nil {
 		if os.IsNotExist(err) && looksLikeLocalPath(value) {
 			return fileIdentity{}, false, fmt.Errorf("本地媒体文件不存在: %s", value)
+		}
+		if looksLikeLocalPath(value) {
+			return fileIdentity{}, false, fmt.Errorf("无法读取本地媒体文件: %w", err)
 		}
 		return fileIdentity{}, false, nil
 	}

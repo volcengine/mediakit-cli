@@ -127,7 +127,7 @@ func writeJSON(output io.Writer, value any) error {
 	}
 	if m, ok := value.(map[string]any); ok {
 		if errField, exists := m["error"]; exists && !isEmptyErrorValue(errField) {
-			return cliexit.ErrBusinessFailure
+			return cliexit.NewBusinessFailure(1)
 		}
 	}
 	return nil
@@ -232,6 +232,8 @@ func (e *DependencyError) Error() string {
 // StructuredError 返回结构化错误（含 install_guide），供 JSON 输出使用
 func (e *DependencyError) StructuredError() map[string]any {
 	return map[string]any{
+		"success":    false,
+		"error_type": "local",
 		"error": map[string]any{
 			"type":          "EnvironmentError",
 			"code":          "DependencyMissing",

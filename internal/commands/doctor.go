@@ -93,7 +93,11 @@ func renderMissingLocalDependencyInstallList(cache cliconfig.EnvCache) string {
 	requiredMissing := cliconfig.MissingRequiredLocalDependencies(cache)
 	optionalMissing := []string{}
 	requiredSet := stringSet(requiredMissing)
-	for _, dep := range admission.AllowedDependencyNames()[2:] {
+	for _, policy := range admission.CurrentPolicies() {
+		if policy.Required {
+			continue
+		}
+		dep := policy.Binary
 		status := cache.Tools[dep]
 		if status.Available {
 			continue

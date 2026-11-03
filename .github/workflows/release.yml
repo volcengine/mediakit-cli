@@ -10,6 +10,11 @@ on:
         description: "Release tag to publish, for example v0.1.0"
         required: true
         type: string
+      npm_only:
+        description: "Publish npm using assets from an already published release"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -29,7 +34,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.22"
           cache: true
 
       - name: Verify package version matches tag
@@ -45,10 +50,11 @@ jobs:
         run: go test ./...
 
       - name: Run GoReleaser
+        if: ${{ !inputs.npm_only }}
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.19.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,6 +70,11 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Verify npm publishing identity
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami --registry=https://registry.npmjs.org/
 
       - name: Publish npm package
         env:

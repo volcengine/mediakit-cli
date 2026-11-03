@@ -12,6 +12,14 @@ type Writer struct {
 	WorkDir string
 }
 
+func ResolveAbsoluteOrWorkPath(workDir string, rawPath string) (string, error) {
+	w, err := NewWriter(workDir)
+	if err != nil {
+		return "", err
+	}
+	return w.ResolvePath(rawPath)
+}
+
 func NewWriter(workDir string) (Writer, error) {
 	if strings.TrimSpace(workDir) == "" {
 		var err error

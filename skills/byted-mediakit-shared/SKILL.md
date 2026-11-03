@@ -1,6 +1,6 @@
 ---
 name: byted-mediakit-shared
-version: '0.2.1'
+version: '0.2.2'
 license: 'MIT'
 description: 'MediaKit 是面向音视频与图像处理的专业工具集，覆盖视频剪辑与合成、音频处理、视频理解与增强、图像处理与内容理解等工作流。用户明确提出剪辑、拼接、裁剪、转场、滤镜、运镜、混音、提取字幕、语音转字幕、音视频处理、图片处理、视频分析或画质增强目标时，先加载本 Skill，再按对象和目标选择 audio、editing、image 或 video。不承担具体能力参数说明。'
 permissions:
@@ -28,6 +28,11 @@ MediaKit 是面向音视频与图像处理的专业工具集。它将常见的�
 2. 注入方式：在命令前设置环境变量（推荐），不要把这两个值当成 CLI flag 或业务参数。
 3. `--help` / `--schema` / `--domains` / `--version` 等只读发现命令可不注入；一旦发起
    真实处理或 `shared query-task`，必须注入。
+4. Standard Cloud 工具中的 `callback_args`、`callback_url`、
+   `media_output_destination`、`queue_id` 属于仅允许显式提供的可选字段。只有目标
+   工具的 `--schema` 确实包含该字段，并且用户明确指定了对应值时才可传入；用户
+   未指定时必须省略，不得自行生成、推断、补充或使用臆造的默认值，也不要仅为
+   填充这些可选字段而向用户追问。
 
 示例（每次真实调用都带上）：
 
@@ -38,6 +43,13 @@ MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli shared query-task
 
 `<runtime>` 填当前宿主标识（如 `cursor`、`claude-code`、`codex`）；不确定时填
 `unknown`。不要省略 `MEDIAKIT_SURFACE=skill`。
+
+## 鉴权
+
+- Cloud 调用必须由用户在运行环境提供 `MEDIAKIT_API_KEY`；缺失时停止执行。
+- `MEDIAKIT_LOGID` 非空时由 CLI 透传；未设置时不产生对应 Header。
+- `MEDIAKIT_ENDPOINT` 仅用于用户明确指定的 Cloud endpoint 覆盖。
+- 不在命令、Skill、配置文件或输出中写入鉴权值。
 
 ## 能力范围
 
@@ -55,11 +67,11 @@ MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli shared query-task
 
 按用户的处理对象和明确目标选择领域 Skill：
 
-| 用户目标                                                 | 优先加载                 |
-| -------------------------------------------------------- | ------------------------ |
-| 对现有素材进行裁剪、拼接、转场、滤镜、运镜、叠加、混音或成片编排 | `byted-mediakit-editing` |
-| 处理音频转码、音轨、语音边界或人声与背景声                   | `byted-mediakit-audio`   |
-| 处理单张或批量图片、尺寸体积治理、文字识别、图片质量或图像编辑 | `byted-mediakit-image`   |
+| 用户目标                                                                                                 | 优先加载                 |
+| -------------------------------------------------------------------------------------------------------- | ------------------------ |
+| 对现有素材进行裁剪、拼接、转场、滤镜、运镜、叠加、混音或成片编排                                         | `byted-mediakit-editing` |
+| 处理音频转码、音轨、语音边界或人声与背景声                                                               | `byted-mediakit-audio`   |
+| 处理单张或批量图片、尺寸体积治理、文字识别、图片质量或图像编辑                                           | `byted-mediakit-image`   |
 | 视频理解、高光拆条、抽帧、画质增强或检测、提取字幕、语音转字幕、字幕擦除、水印、隐私、转码或视频智能处理 | `byted-mediakit-video`   |
 
 如果一个请求同时包含多个阶段，先加载与主要产出最匹配的领域 Skill，再按工作流
@@ -120,6 +132,52 @@ mediakit-cli <domain> <tool> --schema
 直接把用户提供的媒体输入传给工具参数。本机文件请传本地文件路径（如
 `/path/to/file.jpg` 或 `./file.jpg`），不要自行添加 `mediakit://` 前缀；CLI
 的媒体输入适配器会处理上传。不需要额外创建上传命令或上传参数。
+
+## 音视频元数据前置探测
+
+- 当目标工具的限制依赖音视频时长、分辨率、文件大小、封装、编码、码率、采样率或声道，而用户没有提供可信元信息时，先加载对应领域 Skill：音频使用 `probe-audio-metadata`，视频使用 `probe-video-metadata`；editing 按实际输入类型复用这两个工具。
+- 探测后必须将结果与最终目标工具 reference 的限制逐项比较；确认超限或不兼容时停止并要求用户更换或调整输入，不得盲目调用。
+- 元数据探测不能保证后端一定处理成功，也不替代目标工具的专属约束；图片格式、大小和尺寸由图片 CLI 的工具级前置检查执行。
+
+## JSON 参数传参
+
+对象或对象数组参数必须传合法 JSON 字符串，不能用逗号分隔或裸文本。
+`array<string>` 仍用逗号分隔或重复 flag，不要套用本节。
+
+支持四种载荷写法：
+
+- 内联 JSON：直接把 JSON 作为 flag 值传入。
+- `@文件`：从本机 JSON 文件读取，例如 `--subtitles @./subtitles.json`。
+- `-` stdin：从标准输入读取；同一命令全局至多一个 `-`。
+- `file://`：从文件 URL 读取，例如 `file://./subtitles.json` 或 `file:///abs/path/subtitles.json`。
+
+POSIX / bash / zsh：内联 JSON 用单引号整体包裹，保留 JSON 内部双引号；大 JSON 优先使用 `@文件` 或 stdin。
+
+```bash
+MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-subtitle-to-video --video-url "<url>" --subtitles '[{"start_time":0,"end_time":3,"subtitle_text":"大家好"}]'
+MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-subtitle-to-video --video-url "<url>" --subtitles @./subtitles.json
+jq -nc '[{"start_time":0,"end_time":3,"subtitle_text":"大家好"}]' | MEDIAKIT_SURFACE=skill MEDIAKIT_RUNTIME=<runtime> mediakit-cli editing add-subtitle-to-video --video-url "<url>" --subtitles -
+```
+
+Windows PowerShell：单引号或 `$json` 变量都会把 JSON 里的 `"` 剥掉，CLI 会报
+`invalid character 's'` / `'t'`。必须把 JSON flag 放在 `--%` 之后；整段 JSON
+用双引号包裹，JSON 内部的 `"` 写成 `\"`。带空格的路径等普通参数放在 `--%`
+之前。`--%` 之后不要使用 PowerShell 变量。文件载荷也放在 `--%` 之后，优先使用
+`file:///C:/...` 或 `@C:\...`。
+
+```powershell
+$env:MEDIAKIT_SURFACE="skill"; $env:MEDIAKIT_RUNTIME="<runtime>"
+mediakit-cli editing add-subtitle-to-video --video-url "C:\path\video.mp4" --% --subtitles "[{\"start_time\":0,\"end_time\":3,\"subtitle_text\":\"大家好\"}]"
+mediakit-cli video erase-video-subtitle-pro --video-url "C:\path\video.mp4" --mode Text --% --erase-ratio-location "[{\"top_left_x\":0,\"top_left_y\":0,\"bottom_right_x\":1,\"bottom_right_y\":0.2}]"
+mediakit-cli editing add-subtitle-to-video --video-url "C:\path\video.mp4" --% --subtitles file:///C:/path/subtitles.json
+```
+
+Windows 内联 JSON 禁止：
+
+- `'[{...}]'` 单引号 JSON
+- `--flag $json` 或 `--flag "$json"`
+- `Get-Content` 读出 JSON 后再当 flag 传入
+- `cmd /c` 多层转义
 
 ## Cloud / Local 模式
 

@@ -19,8 +19,9 @@ const (
 	uploadCacheTTL     = 12 * time.Hour
 	maxCacheEntries    = 1000
 	uploadLockTimeout  = 5 * time.Second
-	uploadLockStaleAge = 10 * time.Minute
 )
+
+var errUploadCacheCorrupt = errors.New("upload cache is corrupt")
 
 type uploadCache struct {
 	Version int                         `json:"version"`
@@ -70,13 +71,17 @@ func normalizeUploadCacheEndpoint(endpoint string) string {
 func lookupUploadCache(home string, authKey string, identity fileIdentity, now time.Time) (string, error) {
 	lock, err := acquireUploadCacheLock(home)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	defer lock.Release()
 
 	cache, err := readUploadCache(home)
 	if err != nil {
-		return "", nil
+		if errors.Is(err, errUploadCacheCorrupt) {
+			_ = writeUploadCache(home, cache)
+			return "", nil
+		}
+		return "", err
 	}
 	changed := cache.normalizeFromLegacyFormats()
 	if pruned := sweepUploadCacheEntries(&cache, authKey, now); pruned > 0 || changed {
@@ -93,7 +98,7 @@ func lookupUploadCache(home string, authKey string, identity fileIdentity, now t
 func storeUploadCache(home string, authKey string, identity fileIdentity, fileID string, now time.Time) (string, error) {
 	lock, err := acquireUploadCacheLock(home)
 	if err != nil {
-		return fileID, nil
+		return fileID, err
 	}
 	defer lock.Release()
 
@@ -212,13 +217,13 @@ func readUploadCache(home string) (uploadCache, error) {
 		return cache, nil
 	}
 	if err != nil {
-		return uploadCache{Version: uploadCacheVersion, Entries: map[string]uploadCacheEntry{}}, nil
+		return cache, err
 	}
 	if len(data) == 0 {
 		return cache, nil
 	}
 	if err := json.Unmarshal(data, &cache); err != nil {
-		return uploadCache{Version: uploadCacheVersion, Entries: map[string]uploadCacheEntry{}}, nil
+		return uploadCache{Version: uploadCacheVersion, Entries: map[string]uploadCacheEntry{}}, errUploadCacheCorrupt
 	}
 	if cache.Entries == nil {
 		cache.Entries = map[string]uploadCacheEntry{}
@@ -301,31 +306,30 @@ func acquireUploadCacheLock(home string) (*cacheLock, error) {
 	lockPath := cacheFile + ".lock"
 	deadline := time.Now().Add(uploadLockTimeout)
 	for {
-		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 		if err == nil {
+			err = lockUploadCacheFile(file)
+			if err != nil {
+				_ = file.Close()
+				if isUploadCacheLockBusy(err) {
+					if time.Now().After(deadline) {
+						return nil, errors.New("等待上传缓存锁超时")
+					}
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
+				return nil, err
+			}
+			if err := file.Truncate(0); err != nil {
+				_ = unlockUploadCacheFile(file)
+				_ = file.Close()
+				return nil, err
+			}
 			_, _ = file.WriteString(time.Now().UTC().Format(time.RFC3339Nano))
 			return &cacheLock{path: lockPath, file: file}, nil
 		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, err
-		}
-		if isStaleUploadLock(lockPath) {
-			_ = os.Remove(lockPath)
-			continue
-		}
-		if time.Now().After(deadline) {
-			return nil, errors.New("等待上传缓存锁超时")
-		}
-		time.Sleep(50 * time.Millisecond)
+		return nil, err
 	}
-}
-
-func isStaleUploadLock(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return time.Since(info.ModTime()) > uploadLockStaleAge
 }
 
 func (lock *cacheLock) Release() {
@@ -333,9 +337,7 @@ func (lock *cacheLock) Release() {
 		return
 	}
 	if lock.file != nil {
+		_ = unlockUploadCacheFile(lock.file)
 		_ = lock.file.Close()
-	}
-	if lock.path != "" {
-		_ = os.Remove(lock.path)
 	}
 }

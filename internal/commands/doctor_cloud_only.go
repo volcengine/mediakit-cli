@@ -42,7 +42,9 @@ func newDoctorCmd() *cobra.Command {
 			if err := encoder.Encode(payload); err != nil {
 				return err
 			}
-			return authErr
+			// doctor reports readiness in its JSON payload; an absent runtime
+			// credential is diagnostic state, not a second stderr error.
+			return nil
 		},
 	}
 }
