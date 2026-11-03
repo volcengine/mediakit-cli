@@ -25,3 +25,27 @@ import "errors"
 //   - 跳过 stderr 打印（错误结构已在 stdout JSON 中）
 //   - 进程退出码 os.Exit(1)
 var ErrBusinessFailure = errors.New("mediakit-cli: business failure")
+
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() }
+func (e *ExitError) Unwrap() error { return e.Err }
+func NewBusinessFailure(code int) error {
+	if code < 1 || code > 255 {
+		code = 1
+	}
+	return &ExitError{Code: code, Err: ErrBusinessFailure}
+}
+func ExitCode(err error) int {
+	var e *ExitError
+	if errors.As(err, &e) {
+		return e.Code
+	}
+	if err == nil {
+		return 0
+	}
+	return 1
+}

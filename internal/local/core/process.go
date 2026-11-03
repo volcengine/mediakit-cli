@@ -3,9 +3,9 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"mediakit-cli/internal/netguard"
 )
 
 // MaterializeInput converts a local path or remote URL into a local file path.
@@ -47,7 +49,28 @@ func RunBinary(binary string, args ...string) ([]byte, error) {
 		}
 	}
 
-	cmd := exec.Command(binary, args...)
+	cmd := exec.CommandContext(context.Background(), binary, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(output))
+		if text == "" {
+			return nil, err
+		}
+		return output, fmt.Errorf("%w: %s", err, text)
+	}
+	return output, nil
+}
+
+func RunBinaryContext(ctx context.Context, binary string, args ...string) ([]byte, error) {
+	if err := ValidateSafeText(binary, "可执行文件"); err != nil {
+		return nil, err
+	}
+	for _, arg := range args {
+		if err := ValidateSafeText(arg, "命令参数"); err != nil {
+			return nil, err
+		}
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		text := strings.TrimSpace(string(output))
@@ -78,6 +101,25 @@ func RunFFprobe(args ...string) ([]byte, error) {
 		}
 	}
 	return RunBinary("ffprobe", args...)
+}
+
+func RunFFmpegContext(ctx context.Context, args ...string) ([]byte, error) {
+	if err := DefaultFFmpegPolicy().ValidateArgs(args); err != nil {
+		return nil, err
+	}
+	return RunBinaryContext(ctx, "ffmpeg", args...)
+}
+
+func RunFFprobeContext(ctx context.Context, args ...string) ([]byte, error) {
+	for _, arg := range args {
+		if err := ValidateSafeText(arg, "ffprobe 参数"); err != nil {
+			return nil, err
+		}
+		if IsRemoteURL(arg) {
+			return nil, fmt.Errorf("禁止将远程 URL 直接传给 ffprobe")
+		}
+	}
+	return RunBinaryContext(ctx, "ffprobe", args...)
 }
 
 func IsRemoteURL(value string) bool {
@@ -121,8 +163,11 @@ func downloadRemoteFile(tempDir string, source string) (string, error) {
 	if err := ValidateSafeText(source, "远程输入"); err != nil {
 		return "", err
 	}
+	if _, err := netguard.ValidateRemoteURL(context.Background(), source); err != nil {
+		return "", err
+	}
 
-	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Get(source)
+	resp, err := netguard.NewHTTPClient(2 * time.Minute).Get(source)
 	if err != nil {
 		return "", err
 	}
@@ -140,8 +185,12 @@ func downloadRemoteFile(tempDir string, source string) (string, error) {
 	}
 	defer file.Close()
 
-	if _, err := io.Copy(file, resp.Body); err != nil {
+	limited := io.LimitReader(resp.Body, DefaultResourceLimits().MaxDiskBytes+1)
+	if written, err := io.Copy(file, limited); err != nil {
 		return "", err
+	} else if written > DefaultResourceLimits().MaxDiskBytes {
+		_ = os.Remove(targetPath)
+		return "", fmt.Errorf("远程文件超过磁盘限制")
 	}
 	return targetPath, nil
 }

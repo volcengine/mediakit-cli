@@ -1,12 +1,21 @@
 package cloud
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
+
+	"mediakit-cli/internal/netguard"
 )
+
+const mediaUploadTimeout = 60 * time.Minute
 
 type mediaUploadTarget struct {
 	FileID  string
@@ -16,12 +25,29 @@ type mediaUploadTarget struct {
 }
 
 func (c *Client) uploadLocalMediaFile(command string, path string) (string, error) {
-	target, err := c.requestMediaUploadTarget(command)
+	return c.uploadLocalMediaFileWithContext(context.Background(), command, path)
+}
+
+func (c *Client) uploadLocalMediaFileWithContext(ctx context.Context, command string, path string) (string, error) {
+	target, err := c.requestMediaUploadTargetWithContext(ctx, command)
 	if err != nil {
 		return "", err
 	}
 	if target.FileID == "" || target.URL == "" {
 		return "", fmt.Errorf("申请上传地址返回缺少 file_id 或 upload_url")
+	}
+	uploadURL, err := url.Parse(target.URL)
+	if err != nil {
+		return "", fmt.Errorf("上传地址不合法: %w", err)
+	}
+	endpointURL, _ := url.Parse(c.Endpoint)
+	sameEndpoint := endpointURL != nil &&
+		strings.EqualFold(uploadURL.Scheme, endpointURL.Scheme) &&
+		strings.EqualFold(uploadURL.Host, endpointURL.Host)
+	if !sameEndpoint {
+		if _, err := netguard.ValidateRemoteURL(context.Background(), target.URL); err != nil {
+			return "", fmt.Errorf("上传地址不安全: %w", err)
+		}
 	}
 
 	file, err := os.Open(path)
@@ -34,7 +60,7 @@ func (c *Client) uploadLocalMediaFile(command string, path string) (string, erro
 	if method == "" {
 		method = http.MethodPut
 	}
-	req, err := http.NewRequest(method, target.URL, file)
+	req, err := http.NewRequestWithContext(ctx, method, target.URL, file)
 	if err != nil {
 		return "", err
 	}
@@ -43,8 +69,19 @@ func (c *Client) uploadLocalMediaFile(command string, path string) (string, erro
 			req.Header.Set(key, value)
 		}
 	}
+	if req.Header.Get("Content-Type") == "" {
+		if contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path))); contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		} else {
+			req.Header.Set("Content-Type", "application/octet-stream")
+		}
+	}
 
-	resp, err := c.HTTPClient.Do(req)
+	uploadClient := &http.Client{Timeout: mediaUploadTimeout}
+	if !sameEndpoint {
+		uploadClient = netguard.NewHTTPClient(mediaUploadTimeout)
+	}
+	resp, err := uploadClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -58,18 +95,26 @@ func (c *Client) uploadLocalMediaFile(command string, path string) (string, erro
 }
 
 func (c *Client) requestMediaUploadTarget(command string) (mediaUploadTarget, error) {
+	return c.requestMediaUploadTargetWithContext(context.Background(), command)
+}
+
+func (c *Client) requestMediaUploadTargetWithContext(ctx context.Context, command string) (mediaUploadTarget, error) {
 	req, err := c.newRequest(http.MethodPost, "/api/v1/tools-sync/request-media-upload-url", nil, map[string]any{
 		"tool_name": command,
 	})
 	if err != nil {
 		return mediaUploadTarget{}, err
 	}
+	req = req.WithContext(ctx)
 	payload, err := c.do(req)
 	if err != nil {
 		return mediaUploadTarget{}, err
 	}
 	if isBusinessFailure(payload) {
-		return mediaUploadTarget{}, fmt.Errorf("申请上传地址失败: %v", payload["error"])
+		if payload["error"] != nil {
+			return mediaUploadTarget{}, fmt.Errorf("申请上传地址失败: %v", payload["error"])
+		}
+		return mediaUploadTarget{}, fmt.Errorf("申请上传地址失败: unknown error")
 	}
 	result, ok := payload["result"].(map[string]any)
 	if !ok {

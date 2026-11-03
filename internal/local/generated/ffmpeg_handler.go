@@ -3,6 +3,7 @@
 package generated
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -41,7 +42,7 @@ func NewFFmpegHandler(build BuildPlanFunc) core.Handler {
 			return nil, validateErr
 		}
 
-		output, err := core.RunFFmpeg(plan.Args...)
+		output, err := core.RunFFmpegContext(context.Background(), plan.Args...)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +115,7 @@ func stringResultField(result map[string]any, key string) (string, bool) {
 
 func probeMediaInfo(output string) (ffprobeMediaInfo, error) {
 	var info ffprobeMediaInfo
-	raw, err := core.RunFFprobe(
+	raw, err := core.RunFFprobeContext(context.Background(),
 		"-v", "error",
 		"-show_entries", "format=duration:stream=width,height",
 		"-of", "json",
@@ -363,7 +364,8 @@ func outputPathFor(ctx *core.ExecContext, command string, ext string) (string, e
 
 	// 如果用户指定了完整输出文件路径，直接使用
 	if ctx.OutputFile != "" {
-		outputPath, resolveErr := outputWriter.ResolvePath(ctx.OutputFile)
+		requestedOutputFile := ctx.OutputFile
+		outputPath, resolveErr := output.ResolveAbsoluteOrWorkPath(ctx.WorkDir, requestedOutputFile)
 		if resolveErr != nil {
 			return "", resolveErr
 		}

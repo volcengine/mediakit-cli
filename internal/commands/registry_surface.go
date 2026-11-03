@@ -463,7 +463,7 @@ func queryTaskSchema() map[string]any {
 			},
 			"required": []string{"task_id"},
 		},
-		"output_schema": withSharedCloudResponse(map[string]any{
+		"output_schema": mustSharedCloudResponse(map[string]any{
 			"type":                 "object",
 			"description":          "查询结果保留任务公共字段，并将后端 result 中的业务结果字段拍平到顶层。",
 			"additionalProperties": true,
@@ -556,17 +556,17 @@ func bindCapabilityFlags(cmd *cobra.Command, capability surface.Capability) {
 			}
 			strictBool(cmd.Flags(), flagName, value, description)
 		case "array":
-			if isSimpleStringArray(schema) {
+			if isSimpleScalarArray(schema) {
 				value := []string(nil)
 				if hasDefault {
 					value = stringSlice(defaultValue)
 				}
-				cmd.Flags().StringSlice(flagName, value, description)
+				cmd.Flags().Var(newScalarArrayFlagValue(value), flagName, description)
 			} else {
-				cmd.Flags().String(flagName, defaultJSON(defaultValue, hasDefault), description+" 使用 JSON 字符串传入。")
+				cmd.Flags().String(flagName, defaultJSON(defaultValue, hasDefault), description)
 			}
 		default:
-			cmd.Flags().String(flagName, defaultJSON(defaultValue, hasDefault), description+" 使用 JSON 字符串传入。")
+			cmd.Flags().String(flagName, defaultJSON(defaultValue, hasDefault), description)
 		}
 	}
 }
@@ -623,10 +623,29 @@ func collectCapabilityParams(cmd *cobra.Command, capability surface.Capability) 
 		}
 		params[name] = value
 	}
-	if err := validateObjectCombinations(selectedSchema, params, "parameters"); err != nil {
+	if err := validateCapabilityCombinations(selectedSchema, capability, params, "parameters"); err != nil {
 		return nil, err
 	}
 	return params, nil
+}
+
+func validateCapabilityCombinations(selected map[string]any, capability surface.Capability, value map[string]any, path string) error {
+	if hasCombinators(selected) {
+		return validateObjectCombinations(selected, value, path)
+	}
+	if hasCombinators(capability.LocalInputSchema) {
+		return validateObjectCombinations(capability.LocalInputSchema, value, path)
+	}
+	return nil
+}
+
+func hasCombinators(schema map[string]any) bool {
+	for _, key := range []string{"allOf", "anyOf", "oneOf", "if", "not", "x-field-relations"} {
+		if _, ok := schema[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func readCapabilityValue(flags *pflag.FlagSet, flagName string, schema map[string]any) (any, error) {
@@ -640,24 +659,20 @@ func readCapabilityValue(flags *pflag.FlagSet, flagName string, schema map[strin
 	case "boolean":
 		return flags.GetBool(flagName)
 	case "array":
-		if isSimpleStringArray(schema) {
-			return flags.GetStringSlice(flagName)
+		if isSimpleScalarArray(schema) {
+			flag := flags.Lookup(flagName)
+			value, ok := flag.Value.(*scalarArrayFlagValue)
+			if !ok {
+				return nil, fmt.Errorf("--%s 不是 scalar array flag", flagName)
+			}
+			return readSimpleScalarArrayFlag(value.values, simpleArrayItemType(schema))
 		}
 	}
 	raw, err := flags.GetString(flagName)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(raw) == "" {
-		return nil, fmt.Errorf("不能为空")
-	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, fmt.Errorf("需要合法 JSON: %w", err)
-	}
-	return value, nil
+	return readComplexFlagValue(raw)
 }
 
 func capabilityArgsValidator(capability surface.Capability) cobra.PositionalArgs {
@@ -744,10 +759,14 @@ func renderCapabilityHelp(
 		)
 	}
 	properties := schemaProperties(selectedInput)
+	needsEncodingHelp := false
 	if len(properties) > 0 {
 		required := schemaStringSet(schemaStringArray(selectedInput["required"]))
 		lines = append(lines, "", "参数:")
 		for _, name := range sortedKeys(properties) {
+			if schemaNeedsComplexEncodingHelp(properties[name]) || isSimpleScalarArray(properties[name]) {
+				needsEncodingHelp = true
+			}
 			lines = append(
 				lines,
 				"  "+renderParameterDetail(
@@ -757,6 +776,9 @@ func renderCapabilityHelp(
 				),
 			)
 		}
+	}
+	if needsEncodingHelp {
+		lines = append(lines, "", complexFlagEncodingHelp())
 	}
 	if guidance := strings.TrimSpace(fmt.Sprint(selectedInput["description"])); guidance != "" && guidance != "<nil>" {
 		lines = append(
@@ -848,13 +870,6 @@ func renderParameterDetail(
 		line += " 可选值: " + joinJSONValues(values)
 	}
 	line += renderNestedSchema(schema, " ")
-	switch {
-	case isSimpleStringArray(schema):
-		line += " CLI 传参时可使用逗号分隔多个值，或重复传递该 flag；不要传 JSON 数组字符串。"
-	case schemaType(schema) == "object",
-		schemaType(schema) == "array":
-		line += " CLI 传参时必须使用合法 JSON 字符串。"
-	}
 	return line
 }
 
@@ -952,11 +967,16 @@ func renderParameterFlagHelp(schema map[string]any) string {
 			description += "子项可选值: " + joinJSONValues(values)
 		}
 	}
-	if isSimpleStringArray(schema) {
+	if isSimpleScalarArray(schema) {
 		if description != "" {
 			description += " "
 		}
-		description += "CLI 传参时可使用逗号分隔多个值，或重复传递该 flag；不要传 JSON 数组字符串。"
+		description += simpleArrayFlagHelpSuffix()
+	} else if schemaType(schema) == "object" || schemaType(schema) == "array" {
+		if description != "" {
+			description += " "
+		}
+		description += complexFlagHelpSuffix()
 	}
 	if values := schemaArray(schema["enum"]); len(values) > 0 {
 		if description != "" {
@@ -1070,7 +1090,10 @@ func buildCapabilitySchema(
 	if selectedMode == "local" {
 		outputSchema = capability.LocalOutputSchema
 	} else {
-		outputSchema = cloudOutputSchema(capability)
+		outputSchema, err = cloudOutputSchema(capability)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(outputSchema) == 0 {
 		return nil, fmt.Errorf(
@@ -1087,7 +1110,7 @@ func buildCapabilitySchema(
 	}, nil
 }
 
-func cloudOutputSchema(capability surface.Capability) map[string]any {
+func cloudOutputSchema(capability surface.Capability) (map[string]any, error) {
 	if capability.Async {
 		return map[string]any{
 			"type":        "object",
@@ -1108,20 +1131,28 @@ func cloudOutputSchema(capability surface.Capability) map[string]any {
 				},
 			},
 			"required": []string{"task_id"},
-		}
+		}, nil
 	}
 	return withSharedCloudResponse(capability.Response)
 }
 
-func withSharedCloudResponse(base map[string]any) map[string]any {
+func mustSharedCloudResponse(base map[string]any) map[string]any {
+	schema, err := withSharedCloudResponse(base)
+	if err != nil {
+		panic(err)
+	}
+	return schema
+}
+
+func withSharedCloudResponse(base map[string]any) (map[string]any, error) {
 	baseProperties, ok := base["properties"].(map[string]any)
 	if !ok {
-		panic("Cloud response schema properties must be an object")
+		return nil, fmt.Errorf("Cloud response schema properties must be an object")
 	}
 	shared := surface.Current().SharedCloudResponseSchema
 	sharedProperties, ok := shared["properties"].(map[string]any)
 	if !ok {
-		panic("shared Cloud response schema properties must be an object")
+		return nil, fmt.Errorf("shared Cloud response schema properties must be an object")
 	}
 
 	merged := make(map[string]any, len(base)+1)
@@ -1134,12 +1165,12 @@ func withSharedCloudResponse(base map[string]any) map[string]any {
 	}
 	for key, value := range sharedProperties {
 		if _, exists := properties[key]; exists {
-			panic("shared Cloud response field collides with capability response: " + key)
+			return nil, fmt.Errorf("shared Cloud response field collides with capability response: %s", key)
 		}
 		properties[key] = value
 	}
 	merged["properties"] = properties
-	return merged
+	return merged, nil
 }
 
 func validateSchemaValue(schema map[string]any, value any, path string) error {
@@ -1278,11 +1309,74 @@ func validateObject(schema map[string]any, value map[string]any, path string) er
 			return err
 		}
 	}
+	if err := validateFieldRelations(schema, value, path); err != nil {
+		return err
+	}
 	return nil
 }
 
 func validateObjectCombinations(schema map[string]any, value map[string]any, path string) error {
+	if err := validateFieldRelations(schema, value, path); err != nil {
+		return err
+	}
 	return validateCombinators(schema, value, path)
+}
+
+func validateFieldRelations(schema map[string]any, value map[string]any, path string) error {
+	for index, raw := range schemaArray(schema["x-field-relations"]) {
+		relation, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s.x-field-relations[%d] 配置无效", path, index)
+		}
+		operator, _ := relation["operator"].(string)
+		left, _ := relation["left"].(string)
+		right, _ := relation["right"].(string)
+		if operator == "" || left == "" || right == "" {
+			return fmt.Errorf("%s.x-field-relations[%d] 配置无效", path, index)
+		}
+		leftValue, hasLeft := value[left]
+		rightValue, hasRight := value[right]
+		if !hasLeft || !hasRight {
+			continue
+		}
+		leftNumber, leftOK := numberValue(leftValue)
+		rightNumber, rightOK := numberValue(rightValue)
+		if !leftOK || !rightOK {
+			return fmt.Errorf("%s.%s 与 %s.%s 必须是数字", path, left, path, right)
+		}
+		valid := false
+		switch operator {
+		case "greater_than":
+			valid = leftNumber > rightNumber
+		case "greater_than_or_equal":
+			valid = leftNumber >= rightNumber
+		case "less_than":
+			valid = leftNumber < rightNumber
+		case "less_than_or_equal":
+			valid = leftNumber <= rightNumber
+		default:
+			return fmt.Errorf("%s.x-field-relations[%d] operator %q 不支持", path, index, operator)
+		}
+		if !valid {
+			return fmt.Errorf("%s.%s 必须%s %s.%s", path, left, fieldRelationOperatorText(operator), path, right)
+		}
+	}
+	return nil
+}
+
+func fieldRelationOperatorText(operator string) string {
+	switch operator {
+	case "greater_than":
+		return "大于"
+	case "greater_than_or_equal":
+		return "大于等于"
+	case "less_than":
+		return "小于"
+	case "less_than_or_equal":
+		return "小于等于"
+	default:
+		return operator
+	}
 }
 
 func validateCombinators(schema map[string]any, value any, path string) error {
@@ -1334,9 +1428,10 @@ func writeCapabilityError(writer io.Writer, err error) error {
 	payload, ok := localDependencyErrorPayload(err)
 	if !ok {
 		payload = map[string]any{
+			"success":    false,
+			"error_type": "client",
 			"error": map[string]any{
-				"type":    classifyErrorType(err),
-				"code":    classifyErrorCode(err),
+				"code":    clientErrorCode(err),
 				"message": err.Error(),
 			},
 		}
@@ -1348,7 +1443,15 @@ func writeCapabilityError(writer io.Writer, err error) error {
 	if encodeErr := encoder.Encode(payload); encodeErr != nil {
 		return encodeErr
 	}
-	return cliexit.ErrBusinessFailure
+	return cliexit.NewBusinessFailure(2)
+}
+
+func clientErrorCode(err error) string {
+	message := err.Error()
+	if strings.Contains(message, "required flag(s)") || strings.Contains(message, "至少需要") || strings.Contains(message, "为必填") {
+		return "MissingParameter"
+	}
+	return "InvalidParameter"
 }
 
 func writeJSON(writer io.Writer, value any) error {
@@ -1511,11 +1614,6 @@ func schemaStringSet(values []string) map[string]bool {
 		result[value] = true
 	}
 	return result
-}
-
-func isSimpleStringArray(schema map[string]any) bool {
-	items, _ := schema["items"].(map[string]any)
-	return schemaType(items) == "string"
 }
 
 func defaultJSON(value any, present bool) string {

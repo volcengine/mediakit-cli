@@ -1,8 +1,10 @@
 package cloud
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -35,6 +37,10 @@ func NewClient(authContext auth.Context, endpoint string, runtime string) *Clien
 }
 
 func (c *Client) Call(apiName string, args map[string]any) (map[string]any, error) {
+	return c.CallWithContext(context.Background(), apiName, args)
+}
+
+func (c *Client) CallWithContext(ctx context.Context, apiName string, args map[string]any) (map[string]any, error) {
 	method := ""
 	path := ""
 	if apiName == queryTaskCommand {
@@ -53,7 +59,7 @@ func (c *Client) Call(apiName string, args map[string]any) (map[string]any, erro
 	for key, value := range payload {
 		placeholder := "{" + key + "}"
 		if strings.Contains(path, placeholder) {
-			path = strings.Replace(path, placeholder, fmt.Sprint(value), 1)
+			path = strings.Replace(path, placeholder, url.PathEscape(fmt.Sprint(value)), 1)
 			delete(payload, key)
 		}
 	}
@@ -65,12 +71,14 @@ func (c *Client) Call(apiName string, args map[string]any) (map[string]any, erro
 		if err != nil {
 			return nil, err
 		}
+		req = req.WithContext(ctx)
 		return c.do(req)
 	default:
 		req, err := c.newRequest(method, path, nil, payload)
 		if err != nil {
 			return nil, err
 		}
+		req = req.WithContext(ctx)
 		return c.do(req)
 	}
 }

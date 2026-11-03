@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -29,12 +30,26 @@ func resolveRuntime(configRuntime string) string {
 	return resolveRuntimeFrom(configRuntime, os.Environ())
 }
 
+func safeRuntimeHeader(configRuntime string) (string, error) {
+	env := parseEnviron(os.Environ())
+	for _, value := range []string{env[buildenv.Runtime], configRuntime} {
+		if strings.ContainsAny(value, "\r\n\x00") {
+			return "", fmt.Errorf("%s 包含不允许的控制字符", buildenv.Runtime)
+		}
+	}
+	value := resolveRuntimeFrom(configRuntime, os.Environ())
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return "", fmt.Errorf("%s 包含不允许的控制字符", buildenv.Runtime)
+	}
+	return value, nil
+}
+
 func resolveTaskSource() (string, error) {
 	const productSource = "cli"
 	value := strings.TrimSpace(os.Getenv(buildenv.TaskSource))
-	if strings.ContainsAny(value, "\r\n") {
+	if strings.ContainsAny(value, "\r\n\x00") {
 		return "", fmt.Errorf(
-			"%s 包含不允许的换行字符",
+			"%s 包含不允许的控制字符",
 			buildenv.TaskSource,
 		)
 	}
@@ -85,7 +100,7 @@ func resolveRuntimeFrom(configRuntime string, environ []string) string {
 	if hasNonEmptyEnvPrefix(env, "ARKCLAW_") {
 		return "arkclaw"
 	}
-	if hasNonEmptyEnvPrefix(env, "OPENCLAW_") {
+	if strings.TrimSpace(env[envOpenClawServiceMarker]) != "" || hasNonEmptyEnvPrefix(env, "OPENCLAW_") {
 		return "openclaw"
 	}
 	if hasNonEmptyEnvPrefix(env, "HERMES_") {
@@ -331,11 +346,11 @@ func hasNonEmptyEnvPrefix(env map[string]string, prefix string) bool {
 func (c *Client) newRequest(method string, path string, query map[string]any, body map[string]any) (*http.Request, error) {
 	url := strings.TrimRight(c.Endpoint, "/") + "/" + strings.TrimLeft(path, "/")
 	if len(query) > 0 {
-		pairs := make([]string, 0, len(query))
+		values := neturl.Values{}
 		for key, value := range query {
-			pairs = append(pairs, fmt.Sprintf("%s=%v", key, value))
+			values.Set(key, fmt.Sprint(value))
 		}
-		url += "?" + strings.Join(pairs, "&")
+		url += "?" + values.Encode()
 	}
 
 	var bodyReader io.Reader
@@ -353,7 +368,11 @@ func (c *Client) newRequest(method string, path string, query map[string]any, bo
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Amk-Cli-Runtime", resolveRuntime(c.Runtime))
+	runtime, err := safeRuntimeHeader(c.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Amk-Cli-Runtime", runtime)
 	taskSource, err := resolveTaskSource()
 	if err != nil {
 		return nil, err

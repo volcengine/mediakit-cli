@@ -20,12 +20,13 @@ import (
 type Executor struct{}
 
 const (
-	queryTaskCommand        = "query-task"
-	queryTaskIDParam        = "task_id"
-	pollIntervalParam       = "poll_interval_seconds"
-	maxPollAttemptsParam    = "max_poll_attempts"
-	pollCompleteParam       = "poll_complete"
-	maxPollTimeoutParam     = "max_poll_timeout_seconds"
+	queryTaskCommand     = "query-task"
+	queryTaskIDParam     = "task_id"
+	pollIntervalParam    = "poll_interval_seconds"
+	maxPollAttemptsParam = "max_poll_attempts"
+	pollCompleteParam    = "poll_complete"
+	maxPollTimeoutParam  = "max_poll_timeout_seconds"
+	pollStatusMetaKey    = "__poll_status"
 )
 
 type queryTaskPollOptions struct {
@@ -43,15 +44,24 @@ func Execute(cmd *cobra.Command, command string, params map[string]any, authCont
 	normalizedCommand := normalizeCommand(command)
 	normalizedParams := normalizeParams(params)
 	applySeparateVoiceOutputFormatFallback(normalizedCommand, normalizedParams)
+	applyEraseVideoSubtitleProModelVersionFallback(normalizedCommand, normalizedParams)
 	pollOptions, requestParams, err := splitQueryTaskOptions(normalizedCommand, normalizedParams)
 	if err != nil {
-		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
+		return writeJSON(cmd.OutOrStdout(), clientErrorResponse(err, extractTaskID(requestParams)))
+	}
+
+	if err := precheckReachableMediaURLs(normalizedCommand, requestParams); err != nil {
+		return writeJSON(cmd.OutOrStdout(), clientErrorResponse(err, extractTaskID(requestParams)))
 	}
 
 	client := NewClient(authContext, endpoint, runtime)
+	if err := precheckImageInputsWithMetadataFallback(client, normalizedCommand, requestParams); err != nil {
+		return writeJSON(cmd.OutOrStdout(), clientErrorResponse(err, extractTaskID(requestParams)))
+	}
+
 	requestParams, err = materializeCloudMediaInputs(client, normalizedCommand, requestParams)
 	if err != nil {
-		return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), ""))
+		return writeJSON(cmd.OutOrStdout(), clientErrorResponse(err, extractTaskID(requestParams)))
 	}
 	response, err := client.Call(normalizedCommand, requestParams)
 	if err != nil {
@@ -61,7 +71,7 @@ func Execute(cmd *cobra.Command, command string, params map[string]any, authCont
 	if normalizedCommand == queryTaskCommand {
 		response, err = maybePollQueryTask(client, requestParams, response, pollOptions)
 		if err != nil {
-			return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(response), extractRequestID(response)))
+			return writeJSON(cmd.OutOrStdout(), errorResponse(err, extractTaskID(requestParams), extractRequestID(response)))
 		}
 	}
 	if normalizedCommand != queryTaskCommand &&
@@ -106,6 +116,16 @@ func applySeparateVoiceOutputFormatFallback(command string, params map[string]an
 	value, ok := params["output_format"]
 	if !ok || strings.TrimSpace(fmt.Sprint(value)) == "" || fmt.Sprint(value) == "<nil>" {
 		params["output_format"] = "mp3"
+	}
+}
+
+func applyEraseVideoSubtitleProModelVersionFallback(command string, params map[string]any) {
+	if command != "erase-video-subtitle-pro" {
+		return
+	}
+	value, ok := params["model_version"]
+	if !ok || strings.TrimSpace(fmt.Sprint(value)) == "" || fmt.Sprint(value) == "<nil>" {
+		params["model_version"] = "v5"
 	}
 }
 
@@ -184,14 +204,15 @@ func maybePollQueryTask(client queryTaskPoller, requestParams map[string]any, re
 
 	pollStart := time.Now()
 	deadline, hasDeadline := options.pollDeadline(pollStart)
-
-	if options.PollComplete {
+	if options.PollComplete && options.MaxAttempts == 0 {
 		for {
 			if pollDeadlineReached(deadline, hasDeadline) {
+				response[pollStatusMetaKey] = "timeout"
 				return response, nil
 			}
 			time.Sleep(options.PollInterval)
 			if pollDeadlineReached(deadline, hasDeadline) {
+				response[pollStatusMetaKey] = "timeout"
 				return response, nil
 			}
 			next, err := client.Call(queryTaskCommand, requestParams)
@@ -221,6 +242,13 @@ func maybePollQueryTask(client queryTaskPoller, requestParams map[string]any, re
 		response = next
 		if isTerminalTaskStatus(response) {
 			break
+		}
+	}
+	if !isTerminalTaskStatus(response) {
+		if hasDeadline && pollDeadlineReached(deadline, hasDeadline) {
+			response[pollStatusMetaKey] = "timeout"
+		} else {
+			response[pollStatusMetaKey] = "attempts_exhausted"
 		}
 	}
 
@@ -298,9 +326,7 @@ func syncToolResponse(result map[string]any) map[string]any {
 	}
 	taskResult, ok := result["result"].(map[string]any)
 	if ok {
-		for key, value := range taskResult {
-			output[key] = value
-		}
+		mergeResultFields(output, taskResult)
 	}
 	// usage 只允许来自成功的同步 Cloud 响应 envelope；拍平 result 时先移除
 	// 同名业务字段，避免 result.usage 冒充共享 Cloud 响应。
@@ -344,21 +370,33 @@ func queryTaskResponse(result map[string]any) map[string]any {
 	if status := strings.TrimSpace(fmt.Sprint(result["status"])); status != "" && status != "<nil>" {
 		output["status"] = status
 	}
+	if pollStatus := strings.TrimSpace(fmt.Sprint(result[pollStatusMetaKey])); pollStatus != "" && pollStatus != "<nil>" {
+		output["poll_status"] = pollStatus
+		output["poll_terminal"] = false
+		switch pollStatus {
+		case "timeout":
+			output["message"] = "任务仍在处理中，已达到本次轮询总时长上限；可稍后继续使用 query-task 查询。"
+		case "attempts_exhausted":
+			output["message"] = "任务仍在排队或处理中，已达到本次最大轮询次数；可稍后继续使用 query-task 查询。"
+		}
+	}
 	// query-task 失败终态：注入 success: false，统一交给 writeJSON 触发 sentinel。
 	// 仅在此处做语义判定，避免污染非 query-task 路径。
 	if isBusinessFailure(result) || isTerminalFailure(result) {
 		output["success"] = false
+		output["error_type"] = "api"
 		if errField, ok := result["error"]; ok && errField != nil {
 			output["error"] = errField
 		} else {
 			output["error"] = "unknown error"
 		}
+		if errorMap, ok := output["error"].(map[string]any); ok {
+			output["__exit_code"] = errorExitCode(errorMap["code"])
+		}
 	}
 	taskResult, ok := result["result"].(map[string]any)
 	if ok {
-		for key, value := range taskResult {
-			output[key] = value
-		}
+		mergeResultFields(output, taskResult)
 	}
 	// query-task 只有 completed 成功终态允许透传 envelope usage。
 	// pending、失败或取消终态均不得输出。
@@ -369,6 +407,30 @@ func queryTaskResponse(result map[string]any) map[string]any {
 		applyCloudUsage(output, result)
 	}
 	return output
+}
+
+var reservedEnvelopeOutputFields = map[string]struct{}{
+	"__exit_code":   {},
+	"error":         {},
+	"error_type":    {},
+	"message":       {},
+	"poll_status":   {},
+	"poll_terminal": {},
+	"request_id":    {},
+	"status":        {},
+	"success":       {},
+	"task_id":       {},
+	"task_type":     {},
+	"usage":         {},
+}
+
+func mergeResultFields(output map[string]any, taskResult map[string]any) {
+	for key, value := range taskResult {
+		if _, reserved := reservedEnvelopeOutputFields[key]; reserved {
+			continue
+		}
+		output[key] = value
+	}
 }
 
 func applyCloudUsage(output map[string]any, envelope map[string]any) {
@@ -427,6 +489,13 @@ func isSuccessFalse(payload map[string]any) bool {
 }
 
 func writeJSON(writer io.Writer, value any) error {
+	exitCode := 1
+	if m, ok := value.(map[string]any); ok {
+		if raw, exists := m["__exit_code"]; exists {
+			exitCode = intValue(raw)
+			delete(m, "__exit_code")
+		}
+	}
 	if m, ok := value.(map[string]any); ok {
 		notice.Inject(m)
 	}
@@ -440,10 +509,29 @@ func writeJSON(writer io.Writer, value any) error {
 	// 都会在最终响应中显式写入 success=false，writeJSON 只需识别该字段。
 	if m, ok := value.(map[string]any); ok {
 		if isSuccessFalse(m) {
-			return cliexit.ErrBusinessFailure
+			return cliexit.NewBusinessFailure(exitCode)
 		}
 	}
 	return nil
+}
+
+func intValue(value any) int {
+	switch n := value.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case json.Number:
+		if parsed, err := n.Int64(); err == nil {
+			return int(parsed)
+		}
+		if parsed, err := strconv.ParseFloat(n.String(), 64); err == nil {
+			return int(parsed)
+		}
+		return 1
+	default:
+		return 1
+	}
 }
 
 func cloneParams(params map[string]any) map[string]any {
